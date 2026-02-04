@@ -209,6 +209,8 @@ fn main() {
         flags.state.as_deref(),
         flags.provider.as_deref(),
         flags.device.as_deref(),
+        flags.stealth,
+        flags.stealth_profile.as_deref(),
     ) {
         Ok(result) => result,
         Err(e) => {

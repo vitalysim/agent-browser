@@ -865,6 +865,73 @@ When enabled, agent-browser connects to a Kernel cloud session instead of launch
 
 Get your API key from the [Kernel Dashboard](https://dashboard.onkernel.com).
 
+## Stealth Mode
+
+Enable anti-detection features for authorized penetration testing and automated testing against bot-protected sites.
+
+### Basic Usage
+
+```bash
+# Enable stealth mode
+agent-browser --stealth open https://example.com
+
+# With specific profile
+agent-browser --stealth --stealth-profile chrome-windows open https://example.com
+```
+
+### Available Profiles
+
+| Profile | Description |
+|---------|-------------|
+| `chrome-windows` | Chrome on Windows 11 (auto-detected on Windows) |
+| `chrome-mac` | Chrome on macOS (auto-detected on macOS) |
+| `chrome-linux` | Chrome on Linux (auto-detected on Linux) |
+| `mobile-android` | Chrome on Android Pixel 8 |
+| `mobile-ios` | Safari on iOS iPhone |
+
+### Advanced Options
+
+Fine-grained control via `stealthOptions`:
+
+```bash
+# Programmatic API
+await browser.launch({
+  stealth: true,
+  stealthProfile: 'chrome-windows',
+  stealthOptions: {
+    blockWebRTC: true,        // Block WebRTC to prevent IP leaks (default: true)
+    useSystemChrome: true,    // Use system Chrome instead of Chrome for Testing
+    clientHints: true,        // Spoof User-Agent Client Hints (default: true)
+    inputCoordinates: true,   // Fix CDP input coordinate leak (default: true)
+  },
+});
+```
+
+### Environment Variables
+
+| Variable | Description |
+|----------|-------------|
+| `AGENT_BROWSER_STEALTH` | Enable stealth mode (`true`) |
+| `AGENT_BROWSER_STEALTH_PROFILE` | Default stealth profile |
+
+### What Stealth Mode Does
+
+- Hides `navigator.webdriver` property
+- Spoofs `navigator.plugins`, `languages`, `hardwareConcurrency`
+- Emulates `window.chrome` runtime object
+- Applies consistent canvas/WebGL/audio fingerprint noise
+- Fixes `outerWidth/outerHeight` for headless mode
+- Spoofs User-Agent Client Hints headers
+- Blocks WebRTC to prevent IP leaks
+- Fixes CDP input coordinate leak
+- Removes Playwright artifacts (`__pwInitScripts`, etc.)
+
+### Limitations
+
+**TLS Fingerprinting (JA3/JA4)**: Cannot be fixed at the JavaScript/browser level. If you need to bypass TLS fingerprinting detection (used by Cloudflare, DataDome), you'll need:
+- Residential proxies that forward through real browsers
+- Anti-detect browsers like Camoufox or Kameleo
+
 ## License
 
 Apache-2.0

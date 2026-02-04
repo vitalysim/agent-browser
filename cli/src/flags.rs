@@ -19,6 +19,8 @@ pub struct Flags {
     pub provider: Option<String>,
     pub ignore_https_errors: bool,
     pub device: Option<String>,
+    pub stealth: bool,
+    pub stealth_profile: Option<String>,
 }
 
 pub fn parse_flags(args: &[String]) -> Flags {
@@ -51,6 +53,10 @@ pub fn parse_flags(args: &[String]) -> Flags {
         provider: env::var("AGENT_BROWSER_PROVIDER").ok(),
         ignore_https_errors: false,
         device: env::var("AGENT_BROWSER_IOS_DEVICE").ok(),
+        stealth: env::var("AGENT_BROWSER_STEALTH")
+            .map(|v| v.to_lowercase() == "true")
+            .unwrap_or(false),
+        stealth_profile: env::var("AGENT_BROWSER_STEALTH_PROFILE").ok(),
     };
 
     let mut i = 0;
@@ -139,6 +145,13 @@ pub fn parse_flags(args: &[String]) -> Flags {
                     i += 1;
                 }
             }
+            "--stealth" => flags.stealth = true,
+            "--stealth-profile" => {
+                if let Some(p) = args.get(i + 1) {
+                    flags.stealth_profile = Some(p.clone());
+                    i += 1;
+                }
+            }
             _ => {}
         }
         i += 1;
@@ -157,6 +170,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--headed",
         "--debug",
         "--ignore-https-errors",
+        "--stealth",
     ];
     // Global flags that take a value (need to skip the next arg too)
     const GLOBAL_FLAGS_WITH_VALUE: &[&str] = &[
@@ -174,6 +188,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "-p",
         "--provider",
         "--device",
+        "--stealth-profile",
     ];
 
     for arg in args.iter() {

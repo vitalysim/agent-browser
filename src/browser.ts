@@ -19,6 +19,7 @@ import os from 'node:os';
 import { existsSync, mkdirSync, rmSync } from 'node:fs';
 import type { LaunchCommand } from './types.js';
 import { type RefMap, type EnhancedSnapshot, getEnhancedSnapshot, parseRef } from './snapshot.js';
+import { getStealthConfig } from './stealth/index.js';
 
 // Screencast frame data from CDP
 export interface ScreencastFrame {
@@ -1078,23 +1079,60 @@ export class BrowserManager {
       browserType === 'firefox' ? firefox : browserType === 'webkit' ? webkit : chromium;
     const viewport = options.viewport ?? { width: 1280, height: 720 };
 
+    // Check for stealth mode (option or env var)
+    const stealthEnabled =
+      options.stealth ?? process.env.AGENT_BROWSER_STEALTH?.toLowerCase() === 'true';
+    const stealthProfile = options.stealthProfile ?? process.env.AGENT_BROWSER_STEALTH_PROFILE;
+    const headless = options.headless ?? true;
+
+    // Get stealth configuration if enabled (only for Chromium)
+    const stealthConfig =
+      stealthEnabled && browserType === 'chromium'
+        ? getStealthConfig({
+            enabled: true,
+            profile: stealthProfile,
+            headless,
+            stealthOptions: options.stealthOptions,
+          })
+        : { args: [], initScript: '', userAgent: '', executablePath: undefined, clientHintsHeaders: undefined };
+
+    // Combine user args with stealth args (stealth args first, user args can override)
+    const combineArgs = (userArgs?: string[]): string[] => {
+      const args = [...stealthConfig.args];
+      if (userArgs) {
+        args.push(...userArgs);
+      }
+      return args;
+    };
+
+    // Determine user agent (user-provided takes precedence over stealth)
+    const effectiveUserAgent = options.userAgent || stealthConfig.userAgent || undefined;
+
+    // Determine executable path (user-provided takes precedence over stealth's system Chrome)
+    const effectiveExecutablePath = options.executablePath || stealthConfig.executablePath || undefined;
+
     let context: BrowserContext;
     if (hasExtensions) {
       // Extensions require persistent context in a temp directory
       const extPaths = options.extensions!.join(',');
       const session = process.env.AGENT_BROWSER_SESSION || 'default';
-      // Combine extension args with custom args
+      // Combine extension args with custom args and stealth args
       const extArgs = [`--disable-extensions-except=${extPaths}`, `--load-extension=${extPaths}`];
-      const allArgs = options.args ? [...extArgs, ...options.args] : extArgs;
+      // Note: stealth mode disables extensions by default, so we need to be careful here
+      // For extensions, we skip the --disable-extensions stealth arg
+      const stealthArgsWithoutDisableExt = stealthConfig.args.filter(
+        (arg) => arg !== '--disable-extensions'
+      );
+      const allArgs = [...stealthArgsWithoutDisableExt, ...extArgs, ...(options.args || [])];
       context = await launcher.launchPersistentContext(
         path.join(os.tmpdir(), `agent-browser-ext-${session}`),
         {
           headless: false,
-          executablePath: options.executablePath,
+          executablePath: effectiveExecutablePath,
           args: allArgs,
           viewport,
           extraHTTPHeaders: options.headers,
-          userAgent: options.userAgent,
+          userAgent: effectiveUserAgent,
           ...(options.proxy && { proxy: options.proxy }),
           ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false,
         }
@@ -1105,12 +1143,12 @@ export class BrowserManager {
       // Expand ~ to home directory since it won't be shell-expanded
       const profilePath = options.profile!.replace(/^~\//, os.homedir() + '/');
       context = await launcher.launchPersistentContext(profilePath, {
-        headless: options.headless ?? true,
-        executablePath: options.executablePath,
-        args: options.args,
+        headless,
+        executablePath: effectiveExecutablePath,
+        args: combineArgs(options.args),
         viewport,
         extraHTTPHeaders: options.headers,
-        userAgent: options.userAgent,
+        userAgent: effectiveUserAgent,
         ...(options.proxy && { proxy: options.proxy }),
         ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false,
       });
@@ -1118,18 +1156,36 @@ export class BrowserManager {
     } else {
       // Regular ephemeral browser
       this.browser = await launcher.launch({
-        headless: options.headless ?? true,
-        executablePath: options.executablePath,
-        args: options.args,
+        headless,
+        executablePath: effectiveExecutablePath,
+        args: combineArgs(options.args),
       });
       this.cdpEndpoint = null;
       context = await this.browser.newContext({
         viewport,
         extraHTTPHeaders: options.headers,
-        userAgent: options.userAgent,
+        userAgent: effectiveUserAgent,
         ...(options.proxy && { proxy: options.proxy }),
         ignoreHTTPSErrors: options.ignoreHTTPSErrors ?? false,
         ...(options.storageState && { storageState: options.storageState }),
+      });
+    }
+
+    // Apply stealth init script if enabled
+    if (stealthConfig.initScript) {
+      await context.addInitScript(stealthConfig.initScript);
+    }
+
+    // Apply client hints headers if enabled (Phase 4 stealth)
+    // This intercepts all requests and adds consistent sec-ch-ua headers
+    if (stealthConfig.clientHintsHeaders) {
+      const clientHintsHeaders = stealthConfig.clientHintsHeaders;
+      await context.route('**/*', async (route) => {
+        const headers = {
+          ...route.request().headers(),
+          ...clientHintsHeaders,
+        };
+        await route.continue({ headers });
       });
     }
 

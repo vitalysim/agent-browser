@@ -7,6 +7,20 @@ export interface BaseCommand {
 }
 
 // Action-specific command types
+/**
+ * Advanced stealth options for fine-grained control over anti-detection features.
+ */
+export interface StealthOptions {
+  /** Block WebRTC to prevent IP leaks when using proxy (default: true when stealth enabled) */
+  blockWebRTC?: boolean;
+  /** Use system Chrome instead of Playwright's Chrome for Testing (default: false) */
+  useSystemChrome?: boolean;
+  /** Spoof User-Agent Client Hints headers (default: true when stealth enabled) */
+  clientHints?: boolean;
+  /** Fix CDP input coordinate leak where screenX/screenY equals clientX/clientY (default: true when stealth enabled) */
+  inputCoordinates?: boolean;
+}
+
 export interface LaunchCommand extends BaseCommand {
   action: 'launch';
   headless?: boolean;
@@ -29,6 +43,9 @@ export interface LaunchCommand extends BaseCommand {
   userAgent?: string;
   provider?: string;
   ignoreHTTPSErrors?: boolean;
+  stealth?: boolean; // Enable stealth mode with anti-detection features
+  stealthProfile?: string; // Stealth fingerprint profile: 'chrome-windows', 'chrome-mac', 'chrome-linux', 'mobile-android', 'mobile-ios'
+  stealthOptions?: StealthOptions; // Advanced stealth configuration options
 }
 
 export interface NavigateCommand extends BaseCommand {

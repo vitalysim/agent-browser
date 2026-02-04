@@ -1425,6 +1425,8 @@ mod tests {
             provider: None,
             ignore_https_errors: false,
             device: None,
+            stealth: false,
+            stealth_profile: None,
         }
     }
 

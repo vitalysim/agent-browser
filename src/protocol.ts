@@ -8,6 +8,16 @@ const baseCommandSchema = z.object({
 });
 
 // Individual action schemas
+// Schema for advanced stealth options
+const stealthOptionsSchema = z
+  .object({
+    blockWebRTC: z.boolean().optional(),
+    useSystemChrome: z.boolean().optional(),
+    clientHints: z.boolean().optional(),
+    inputCoordinates: z.boolean().optional(),
+  })
+  .optional();
+
 const launchSchema = baseCommandSchema.extend({
   action: z.literal('launch'),
   headless: z.boolean().optional(),
@@ -48,6 +58,11 @@ const launchSchema = baseCommandSchema.extend({
   ignoreHTTPSErrors: z.boolean().optional(),
   profile: z.string().optional(),
   storageState: z.string().optional(),
+  stealth: z.boolean().optional(),
+  stealthProfile: z
+    .enum(['chrome-windows', 'chrome-mac', 'chrome-linux', 'mobile-android', 'mobile-ios'])
+    .optional(),
+  stealthOptions: stealthOptionsSchema,
 });
 
 const navigateSchema = baseCommandSchema.extend({

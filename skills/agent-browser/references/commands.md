@@ -227,6 +227,8 @@ agent-browser --headers <json> ...    # HTTP headers scoped to URL's origin
 agent-browser --executable-path <p>   # Custom browser executable
 agent-browser --extension <path> ...  # Load browser extension (repeatable)
 agent-browser --ignore-https-errors   # Ignore SSL certificate errors
+agent-browser --stealth ...           # Enable stealth mode (anti-detection)
+agent-browser --stealth-profile <p>   # Stealth fingerprint profile
 agent-browser --help                  # Show help (-h)
 agent-browser --version               # Show version (-V)
 agent-browser <command> --help        # Show detailed help for a command
@@ -256,4 +258,58 @@ AGENT_BROWSER_EXTENSIONS="/ext1,/ext2"       # Comma-separated extension paths
 AGENT_BROWSER_PROVIDER="browserbase"         # Cloud browser provider
 AGENT_BROWSER_STREAM_PORT="9223"             # WebSocket streaming port
 AGENT_BROWSER_HOME="/path/to/agent-browser"  # Custom install location
+AGENT_BROWSER_STEALTH="true"                 # Enable stealth mode
+AGENT_BROWSER_STEALTH_PROFILE="chrome-mac"   # Default stealth profile
 ```
+
+## Stealth Mode
+
+Anti-detection features for bot-protected sites. Use for authorized penetration testing and automated testing.
+
+### Basic Usage
+
+```bash
+agent-browser --stealth open https://example.com
+agent-browser --stealth --stealth-profile chrome-windows open https://example.com
+```
+
+### Available Profiles
+
+| Profile | Description |
+|---------|-------------|
+| `chrome-windows` | Chrome on Windows 11 (auto-detected on Windows) |
+| `chrome-mac` | Chrome on macOS (auto-detected on macOS) |
+| `chrome-linux` | Chrome on Linux (auto-detected on Linux) |
+| `mobile-android` | Chrome on Android Pixel 8 |
+| `mobile-ios` | Safari on iOS iPhone |
+
+### Stealth Options (Programmatic API)
+
+```typescript
+await browser.launch({
+  stealth: true,
+  stealthProfile: 'chrome-windows',
+  stealthOptions: {
+    blockWebRTC: true,        // Block WebRTC to prevent IP leaks (default: true)
+    useSystemChrome: true,    // Use system Chrome instead of Chrome for Testing
+    clientHints: true,        // Spoof User-Agent Client Hints (default: true)
+    inputCoordinates: true,   // Fix CDP input coordinate leak (default: true)
+  },
+});
+```
+
+### What Stealth Mode Does
+
+- Hides `navigator.webdriver` property
+- Spoofs `navigator.plugins`, `languages`, `hardwareConcurrency`
+- Emulates `window.chrome` runtime object
+- Applies consistent canvas/WebGL/audio fingerprint noise
+- Fixes `outerWidth/outerHeight` for headless mode
+- Spoofs User-Agent Client Hints headers
+- Blocks WebRTC to prevent IP leaks
+- Fixes CDP input coordinate leak
+- Removes Playwright artifacts (`__pwInitScripts`, etc.)
+
+### Limitations
+
+**TLS Fingerprinting (JA3/JA4)**: Cannot be fixed at the JavaScript/browser level. For TLS fingerprinting detection (Cloudflare, DataDome), use residential proxies or anti-detect browsers like Camoufox

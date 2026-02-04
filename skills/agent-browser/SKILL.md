@@ -155,6 +155,29 @@ agent-browser -p ios close
 
 **Real devices:** Works with physical iOS devices if pre-configured. Use `--device "<UDID>"` where UDID is from `xcrun xctrace list devices`.
 
+### Stealth Mode (Anti-Detection)
+
+Enable anti-detection features for bot-protected sites:
+
+```bash
+# Basic stealth mode (auto-detects profile)
+agent-browser --stealth open https://protected-site.com
+agent-browser snapshot -i
+agent-browser click @e1
+
+# With specific fingerprint profile
+agent-browser --stealth --stealth-profile chrome-windows open https://site.com
+
+# Or via environment variables
+export AGENT_BROWSER_STEALTH=true
+export AGENT_BROWSER_STEALTH_PROFILE=chrome-mac
+agent-browser open https://site.com
+```
+
+Profiles: `chrome-windows`, `chrome-mac`, `chrome-linux`, `mobile-android`, `mobile-ios`
+
+See [references/commands.md](references/commands.md) for full stealth options.
+
 ## Ref Lifecycle (Important)
 
 Refs (`@e1`, `@e2`, etc.) are invalidated when the page changes. Always re-snapshot after:

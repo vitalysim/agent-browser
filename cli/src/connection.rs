@@ -217,6 +217,8 @@ pub fn ensure_daemon(
     state: Option<&str>,
     provider: Option<&str>,
     device: Option<&str>,
+    stealth: bool,
+    stealth_profile: Option<&str>,
 ) -> Result<DaemonResult, String> {
     // Check if daemon is running AND responsive
     if is_daemon_running(session) && daemon_ready(session) {
@@ -353,6 +355,14 @@ pub fn ensure_daemon(
             cmd.env("AGENT_BROWSER_IOS_DEVICE", d);
         }
 
+        if stealth {
+            cmd.env("AGENT_BROWSER_STEALTH", "true");
+        }
+
+        if let Some(sp) = stealth_profile {
+            cmd.env("AGENT_BROWSER_STEALTH_PROFILE", sp);
+        }
+
         // Create new process group and session to fully detach
         unsafe {
             cmd.pre_exec(|| {
@@ -426,6 +436,14 @@ pub fn ensure_daemon(
 
         if let Some(d) = device {
             cmd.env("AGENT_BROWSER_IOS_DEVICE", d);
+        }
+
+        if stealth {
+            cmd.env("AGENT_BROWSER_STEALTH", "true");
+        }
+
+        if let Some(sp) = stealth_profile {
+            cmd.env("AGENT_BROWSER_STEALTH_PROFILE", sp);
         }
 
         // CREATE_NEW_PROCESS_GROUP | DETACHED_PROCESS
