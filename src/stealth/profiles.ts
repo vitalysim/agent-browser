@@ -33,7 +33,7 @@ export interface StealthProfile {
  */
 const chromeWindows: StealthProfile = {
   userAgent:
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
   platform: 'Win32',
   vendor: 'Google Inc.',
   vendorSub: '',
@@ -52,13 +52,13 @@ const chromeWindows: StealthProfile = {
   fingerprintSeed: 0x7f3c2d1e,
   clientHints: {
     brands: [
-      { brand: 'Chromium', version: '131' },
-      { brand: 'Google Chrome', version: '131' },
+      { brand: 'Chromium', version: '144' },
+      { brand: 'Google Chrome', version: '144' },
       { brand: 'Not_A Brand', version: '24' },
     ],
     fullVersionList: [
-      { brand: 'Chromium', version: '131.0.6778.69' },
-      { brand: 'Google Chrome', version: '131.0.6778.69' },
+      { brand: 'Chromium', version: '144.0.7559.97' },
+      { brand: 'Google Chrome', version: '144.0.7559.97' },
       { brand: 'Not_A Brand', version: '24.0.0.0' },
     ],
     mobile: false,
@@ -75,7 +75,7 @@ const chromeWindows: StealthProfile = {
  */
 const chromeMac: StealthProfile = {
   userAgent:
-    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
   platform: 'MacIntel',
   vendor: 'Google Inc.',
   vendorSub: '',
@@ -94,13 +94,13 @@ const chromeMac: StealthProfile = {
   fingerprintSeed: 0x4a5b6c7d,
   clientHints: {
     brands: [
-      { brand: 'Chromium', version: '131' },
-      { brand: 'Google Chrome', version: '131' },
+      { brand: 'Chromium', version: '144' },
+      { brand: 'Google Chrome', version: '144' },
       { brand: 'Not_A Brand', version: '24' },
     ],
     fullVersionList: [
-      { brand: 'Chromium', version: '131.0.6778.69' },
-      { brand: 'Google Chrome', version: '131.0.6778.69' },
+      { brand: 'Chromium', version: '144.0.7559.97' },
+      { brand: 'Google Chrome', version: '144.0.7559.97' },
       { brand: 'Not_A Brand', version: '24.0.0.0' },
     ],
     mobile: false,
@@ -117,7 +117,7 @@ const chromeMac: StealthProfile = {
  */
 const chromeLinux: StealthProfile = {
   userAgent:
-    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36',
   platform: 'Linux x86_64',
   vendor: 'Google Inc.',
   vendorSub: '',
@@ -136,13 +136,13 @@ const chromeLinux: StealthProfile = {
   fingerprintSeed: 0x8e9f0a1b,
   clientHints: {
     brands: [
-      { brand: 'Chromium', version: '131' },
-      { brand: 'Google Chrome', version: '131' },
+      { brand: 'Chromium', version: '144' },
+      { brand: 'Google Chrome', version: '144' },
       { brand: 'Not_A Brand', version: '24' },
     ],
     fullVersionList: [
-      { brand: 'Chromium', version: '131.0.6778.69' },
-      { brand: 'Google Chrome', version: '131.0.6778.69' },
+      { brand: 'Chromium', version: '144.0.7559.97' },
+      { brand: 'Google Chrome', version: '144.0.7559.97' },
       { brand: 'Not_A Brand', version: '24.0.0.0' },
     ],
     mobile: false,
@@ -159,7 +159,7 @@ const chromeLinux: StealthProfile = {
  */
 const mobileAndroid: StealthProfile = {
   userAgent:
-    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36',
+    'Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Mobile Safari/537.36',
   platform: 'Linux armv81',
   vendor: 'Google Inc.',
   vendorSub: '',
@@ -178,13 +178,13 @@ const mobileAndroid: StealthProfile = {
   fingerprintSeed: 0x2c3d4e5f,
   clientHints: {
     brands: [
-      { brand: 'Chromium', version: '131' },
-      { brand: 'Google Chrome', version: '131' },
+      { brand: 'Chromium', version: '144' },
+      { brand: 'Google Chrome', version: '144' },
       { brand: 'Not_A Brand', version: '24' },
     ],
     fullVersionList: [
-      { brand: 'Chromium', version: '131.0.6778.69' },
-      { brand: 'Google Chrome', version: '131.0.6778.69' },
+      { brand: 'Chromium', version: '144.0.7559.97' },
+      { brand: 'Google Chrome', version: '144.0.7559.97' },
       { brand: 'Not_A Brand', version: '24.0.0.0' },
     ],
     mobile: true,
@@ -202,7 +202,7 @@ const mobileAndroid: StealthProfile = {
  */
 const mobileIos: StealthProfile = {
   userAgent:
-    'Mozilla/5.0 (iPhone; CPU iPhone OS 17_4 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4 Mobile/15E148 Safari/604.1',
+    'Mozilla/5.0 (iPhone; CPU iPhone OS 18_3 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.3 Mobile/15E148 Safari/604.1',
   platform: 'iPhone',
   vendor: 'Apple Computer, Inc.',
   vendorSub: '',
