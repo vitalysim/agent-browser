@@ -6,6 +6,36 @@ allowed-tools: Bash(agent-browser:*)
 
 # Browser Automation with agent-browser
 
+## Installation (from fork)
+
+**Prerequisites:** Node.js v18+, Rust
+
+```bash
+# 1. Clone the fork
+git clone https://github.com/vitalysim/agent-browser.git
+cd agent-browser
+
+# 2. Checkout the stealth branch
+git checkout enhance-stealth
+
+# 3. Install dependencies
+npm install
+
+# 4. Build TypeScript
+npm run build
+
+# 5. Build the native Rust CLI binary
+npm run build:native
+
+# 6. Install globally
+npm install -g .
+
+# 7. Download Chromium
+agent-browser install
+```
+
+**Verify:** `agent-browser --version`
+
 ## Core Workflow
 
 Every browser automation follows this pattern:
@@ -177,6 +207,28 @@ agent-browser open https://site.com
 Profiles: `chrome-windows`, `chrome-mac`, `chrome-linux`, `mobile-android`, `mobile-ios`
 
 See [references/commands.md](references/commands.md) for full stealth options.
+
+## Handling Blocked Requests
+
+If you encounter bot detection or blocking (access denied, captcha, 403/429 errors, "Please verify you are human"), **always retry with stealth mode**:
+
+```bash
+# If blocked, retry with stealth
+agent-browser --stealth open https://blocked-site.com
+agent-browser snapshot -i
+```
+
+Common signs of blocking:
+- "Access Denied" or "Please verify you are human"
+- Captcha challenges
+- HTTP 403 Forbidden or 429 Too Many Requests
+- Cloudflare/DataDome challenge pages
+- Blank pages or unexpected redirects
+
+When stealth mode alone doesn't work, try with a specific profile:
+```bash
+agent-browser --stealth --stealth-profile chrome-windows open https://site.com
+```
 
 ## Ref Lifecycle (Important)
 
