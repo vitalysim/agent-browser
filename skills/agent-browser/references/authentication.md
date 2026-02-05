@@ -10,7 +10,8 @@ Login flows, session persistence, OAuth, 2FA, and authenticated browsing.
 - [Saving Authentication State](#saving-authentication-state)
 - [Restoring Authentication](#restoring-authentication)
 - [OAuth / SSO Flows](#oauth--sso-flows)
-- [Two-Factor Authentication](#two-factor-authentication)
+- [Persistent Profile (Recommended for 2FA)](#persistent-profile-recommended-for-2fa)
+- [Two-Factor Authentication (Manual State Save)](#two-factor-authentication-manual-state-save)
 - [HTTP Basic Auth](#http-basic-auth)
 - [Cookie-Based Auth](#cookie-based-auth)
 - [Token Refresh Handling](#token-refresh-handling)
@@ -96,7 +97,37 @@ agent-browser wait --url "**/app.example.com**"
 agent-browser state save ./oauth-state.json
 ```
 
-## Two-Factor Authentication
+## Persistent Profile (Recommended for 2FA)
+
+The simplest approach for 2FA - login once manually, then reuse automatically:
+
+**Step 1: First-time login (manual)**
+```bash
+# Browser opens visibly, complete login + 2FA manually
+agent-browser --profile ~/.myapp-auth --headed open https://app.example.com/login
+
+# After completing 2FA, close browser - state auto-saves to profile
+```
+
+**Step 2: Future runs (fully automated)**
+```bash
+# Profile reuses saved cookies - no 2FA needed
+agent-browser --profile ~/.myapp-auth open https://app.example.com/dashboard
+agent-browser --profile ~/.myapp-auth snapshot -i
+```
+
+**How it works:**
+- `--profile <path>` creates a persistent browser context
+- Cookies, localStorage, sessionStorage auto-persist to the directory
+- Most sites don't re-request 2FA while session cookies are valid
+
+**Tips:**
+- Use different profile paths for different accounts
+- Profile path supports `~` for home directory
+- Add `--headed` when you need to see the browser
+- If session expires, repeat Step 1
+
+## Two-Factor Authentication (Manual State Save)
 
 Handle 2FA with manual intervention:
 
