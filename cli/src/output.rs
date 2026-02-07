@@ -1769,6 +1769,8 @@ Options:
   --proxy-bypass <hosts>     Bypass proxy for these hosts (or AGENT_BROWSER_PROXY_BYPASS)
                              e.g., --proxy-bypass "localhost,*.internal.com"
   --ignore-https-errors      Ignore HTTPS certificate errors
+  --stealth                  Enable stealth mode (anti-detection) (or AGENT_BROWSER_STEALTH env)
+  --stealth-profile <name>   Stealth fingerprint profile (or AGENT_BROWSER_STEALTH_PROFILE env)
   -p, --provider <name>      Browser provider: ios, browserbase, kernel, browseruse
   --device <name>            iOS device name (e.g., "iPhone 15 Pro")
   --json                     JSON output
@@ -1785,6 +1787,8 @@ Environment:
   AGENT_BROWSER_STREAM_PORT      Enable WebSocket streaming on port (e.g., 9223)
   AGENT_BROWSER_IOS_DEVICE       Default iOS device name
   AGENT_BROWSER_IOS_UDID         Default iOS device UDID
+  AGENT_BROWSER_STEALTH          Enable stealth mode ("true" to enable)
+  AGENT_BROWSER_STEALTH_PROFILE  Stealth fingerprint profile name
 
 Examples:
   agent-browser open example.com
@@ -1796,6 +1800,7 @@ Examples:
   agent-browser screenshot --full
   agent-browser --cdp 9222 snapshot      # Connect via CDP port
   agent-browser --profile ~/.myapp open example.com  # Persistent profile
+  agent-browser --stealth open example.com           # Stealth mode (anti-detection)
 
 iOS Simulator (requires Xcode and Appium):
   agent-browser -p ios open example.com                    # Use default iPhone
