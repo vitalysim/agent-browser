@@ -1770,7 +1770,8 @@ Options:
                              e.g., --proxy-bypass "localhost,*.internal.com"
   --ignore-https-errors      Ignore HTTPS certificate errors
   --stealth                  Enable stealth mode (anti-detection) (or AGENT_BROWSER_STEALTH env)
-  --stealth-profile <name>   Stealth fingerprint profile (or AGENT_BROWSER_STEALTH_PROFILE env)
+  --stealth-profile <name>   Stealth profile: chrome-windows, chrome-mac, chrome-linux,
+                             mobile-android, mobile-ios (or AGENT_BROWSER_STEALTH_PROFILE env)
   -p, --provider <name>      Browser provider: ios, browserbase, kernel, browseruse
   --device <name>            iOS device name (e.g., "iPhone 15 Pro")
   --json                     JSON output
