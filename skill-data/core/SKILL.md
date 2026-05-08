@@ -209,6 +209,26 @@ AGENT_BROWSER_SESSION_NAME=my-app agent-browser open https://app.example.com
 # State is auto-saved and restored on subsequent runs with the same name.
 ```
 
+### Stealth mode for authorized research
+
+Use stealth mode only for authorized vulnerability research, application
+testing, and controlled browser consistency work:
+
+```bash
+agent-browser --stealth open https://target.example
+agent-browser --stealth --stealth-profile chrome-mac open https://target.example
+```
+
+Stealth mode applies launch/runtime fingerprint consistency patches across
+pages, new tabs, popups, CDP target attachments, cross-origin iframes, and
+recording contexts. It also aligns generated Chrome User-Agent and Client
+Hints metadata with the running browser version.
+
+It is not an anonymity system, CAPTCHA solver, or network-level bypass for
+IP reputation, TLS fingerprinting, proxy quality, or account history. For
+details and advanced `stealthOptions`, see
+[references/stealth-mode.md](references/stealth-mode.md).
+
 ### Extract data
 
 ```bash

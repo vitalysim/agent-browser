@@ -308,6 +308,7 @@ agent-browser --proxy-bypass <hosts>  # Hosts to bypass proxy
 agent-browser --stealth ...           # Enable stealth launch/runtime patches
 agent-browser --stealth-profile <p>   # Stealth profile name
 # Advanced stealth controls are config/env only: stealthOptions or AGENT_BROWSER_STEALTH_*.
+# See references/stealth-mode.md for clientHintsMode, inputRealism, and typingRealism.
 agent-browser --headers <json> ...    # HTTP headers scoped to URL's origin
 agent-browser --executable-path <p>   # Custom browser executable
 agent-browser --extension <path> ...  # Load browser extension (repeatable)
@@ -386,6 +387,11 @@ AGENT_BROWSER_EXECUTABLE_PATH="/path/chrome" # Custom browser path
 AGENT_BROWSER_EXTENSIONS="/ext1,/ext2"       # Comma-separated extension paths
 AGENT_BROWSER_INIT_SCRIPTS="/a.js,/b.js"     # Comma-separated init script paths
 AGENT_BROWSER_ENABLE="react-devtools"        # Comma-separated built-in init script features
+AGENT_BROWSER_STEALTH="1"                    # Enable stealth launch/runtime patches
+AGENT_BROWSER_STEALTH_PROFILE="chrome-mac"   # Stealth profile name
+AGENT_BROWSER_STEALTH_CLIENT_HINTS_MODE="accept-ch" # low-entropy, accept-ch, full
+AGENT_BROWSER_STEALTH_INPUT_REALISM="balanced"      # off, balanced, aggressive
+AGENT_BROWSER_STEALTH_TYPING_REALISM="off"           # reserved; off or balanced
 AGENT_BROWSER_PROVIDER="browserbase"         # Cloud browser provider
 AGENT_BROWSER_STREAM_PORT="9223"             # Override WebSocket streaming port (default: OS-assigned)
 AGENT_BROWSER_HOME="/path/to/agent-browser"  # Custom install location
