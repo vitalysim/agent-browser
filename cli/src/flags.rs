@@ -68,6 +68,8 @@ pub struct Config {
     pub proxy_bypass: Option<String>,
     pub args: Option<String>,
     pub user_agent: Option<String>,
+    pub stealth: Option<bool>,
+    pub stealth_profile: Option<String>,
     pub provider: Option<String>,
     pub device: Option<String>,
     pub ignore_https_errors: Option<bool>,
@@ -129,6 +131,8 @@ impl Config {
             proxy_bypass: other.proxy_bypass.or(self.proxy_bypass),
             args: other.args.or(self.args),
             user_agent: other.user_agent.or(self.user_agent),
+            stealth: other.stealth.or(self.stealth),
+            stealth_profile: other.stealth_profile.or(self.stealth_profile),
             provider: other.provider.or(self.provider),
             device: other.device.or(self.device),
             ignore_https_errors: other.ignore_https_errors.or(self.ignore_https_errors),
@@ -224,6 +228,7 @@ fn extract_config_path(args: &[String]) -> Option<Option<String>> {
         "--proxy-bypass",
         "--args",
         "--user-agent",
+        "--stealth-profile",
         "-p",
         "--provider",
         "--device",
@@ -303,6 +308,8 @@ pub struct Flags {
     pub proxy_bypass: Option<String>,
     pub args: Option<String>,
     pub user_agent: Option<String>,
+    pub stealth: bool,
+    pub stealth_profile: Option<String>,
     pub provider: Option<String>,
     pub ignore_https_errors: bool,
     pub allow_file_access: bool,
@@ -339,6 +346,8 @@ pub struct Flags {
     pub cli_state: bool,
     pub cli_args: bool,
     pub cli_user_agent: bool,
+    pub cli_stealth: bool,
+    pub cli_stealth_profile: bool,
     pub cli_proxy: bool,
     pub cli_proxy_bypass: bool,
     pub cli_allow_file_access: bool,
@@ -437,6 +446,10 @@ pub fn parse_flags(args: &[String]) -> Flags {
         user_agent: env::var("AGENT_BROWSER_USER_AGENT")
             .ok()
             .or(config.user_agent),
+        stealth: env_var_is_truthy("AGENT_BROWSER_STEALTH") || config.stealth.unwrap_or(false),
+        stealth_profile: env::var("AGENT_BROWSER_STEALTH_PROFILE")
+            .ok()
+            .or(config.stealth_profile),
         provider: env::var("AGENT_BROWSER_PROVIDER").ok().or(config.provider),
         ignore_https_errors: env_var_is_truthy("AGENT_BROWSER_IGNORE_HTTPS_ERRORS")
             || config.ignore_https_errors.unwrap_or(false),
@@ -511,6 +524,8 @@ pub fn parse_flags(args: &[String]) -> Flags {
         cli_state: false,
         cli_args: false,
         cli_user_agent: false,
+        cli_stealth: false,
+        cli_stealth_profile: false,
         cli_proxy: false,
         cli_proxy_bypass: false,
         cli_allow_file_access: false,
@@ -649,6 +664,21 @@ pub fn parse_flags(args: &[String]) -> Flags {
                 if let Some(s) = args.get(i + 1) {
                     flags.user_agent = Some(s.clone());
                     flags.cli_user_agent = true;
+                    i += 1;
+                }
+            }
+            "--stealth" => {
+                let (val, consumed) = parse_bool_arg(args, i);
+                flags.stealth = val;
+                flags.cli_stealth = true;
+                if consumed {
+                    i += 1;
+                }
+            }
+            "--stealth-profile" => {
+                if let Some(s) = args.get(i + 1) {
+                    flags.stealth_profile = Some(s.clone());
+                    flags.cli_stealth_profile = true;
                     i += 1;
                 }
             }
@@ -843,6 +873,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--allow-file-access",
         "--auto-connect",
         "--annotate",
+        "--stealth",
         "--content-boundaries",
         "--confirm-interactive",
         "--no-auto-dialog",
@@ -870,6 +901,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--proxy-bypass",
         "--args",
         "--user-agent",
+        "--stealth-profile",
         "-p",
         "--provider",
         "--device",
@@ -1041,6 +1073,35 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_stealth_flag() {
+        let flags = parse_flags(&args("--stealth open example.com"));
+        assert!(flags.stealth);
+        assert!(flags.cli_stealth);
+    }
+
+    #[test]
+    fn test_parse_stealth_false_flag() {
+        let flags = parse_flags(&args("--stealth false open example.com"));
+        assert!(!flags.stealth);
+        assert!(flags.cli_stealth);
+    }
+
+    #[test]
+    fn test_parse_stealth_profile_flag() {
+        let flags = parse_flags(&args("--stealth-profile chrome-windows open example.com"));
+        assert_eq!(flags.stealth_profile.as_deref(), Some("chrome-windows"));
+        assert!(flags.cli_stealth_profile);
+    }
+
+    #[test]
+    fn test_clean_args_removes_stealth_flags() {
+        let cleaned = clean_args(&args(
+            "--stealth --stealth-profile chrome-windows open example.com",
+        ));
+        assert_eq!(cleaned, vec!["open", "example.com"]);
+    }
+
+    #[test]
     fn test_clean_args_removes_executable_path() {
         let cleaned = clean_args(&args(
             "--executable-path /path/to/chromium open example.com",
@@ -1161,6 +1222,8 @@ mod tests {
             "proxyBypass": "localhost",
             "args": "--no-sandbox",
             "userAgent": "test-agent",
+            "stealth": true,
+            "stealthProfile": "chrome-windows",
             "provider": "ios",
             "device": "iPhone 15",
             "ignoreHttpsErrors": true,
@@ -1186,6 +1249,8 @@ mod tests {
         assert_eq!(config.proxy_bypass.as_deref(), Some("localhost"));
         assert_eq!(config.args.as_deref(), Some("--no-sandbox"));
         assert_eq!(config.user_agent.as_deref(), Some("test-agent"));
+        assert_eq!(config.stealth, Some(true));
+        assert_eq!(config.stealth_profile.as_deref(), Some("chrome-windows"));
         assert_eq!(config.provider.as_deref(), Some("ios"));
         assert_eq!(config.device.as_deref(), Some("iPhone 15"));
         assert_eq!(config.ignore_https_errors, Some(true));

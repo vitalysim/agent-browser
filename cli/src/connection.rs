@@ -393,6 +393,8 @@ pub struct DaemonOptions<'a> {
     pub enable: &'a [String],
     pub args: Option<&'a str>,
     pub user_agent: Option<&'a str>,
+    pub stealth: bool,
+    pub stealth_profile: Option<&'a str>,
     pub proxy: Option<&'a str>,
     pub proxy_bypass: Option<&'a str>,
     pub proxy_username: Option<&'a str>,
@@ -443,6 +445,13 @@ fn apply_daemon_env(cmd: &mut Command, session: &str, opts: &DaemonOptions) {
     }
     if let Some(ua) = opts.user_agent {
         cmd.env("AGENT_BROWSER_USER_AGENT", ua);
+    }
+    cmd.env(
+        "AGENT_BROWSER_STEALTH",
+        if opts.stealth { "1" } else { "0" },
+    );
+    if let Some(profile) = opts.stealth_profile {
+        cmd.env("AGENT_BROWSER_STEALTH_PROFILE", profile);
     }
     if let Some(p) = opts.proxy {
         cmd.env("AGENT_BROWSER_PROXY", p);

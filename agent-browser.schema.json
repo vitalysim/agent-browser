@@ -59,6 +59,15 @@
       "type": "string",
       "description": "Custom User-Agent string."
     },
+    "stealth": {
+      "type": "boolean",
+      "description": "Enable stealth mode with anti-detection launch flags and page-runtime patches."
+    },
+    "stealthProfile": {
+      "type": "string",
+      "enum": ["chrome-windows", "chrome-mac", "chrome-linux", "mobile-android", "mobile-ios"],
+      "description": "Fingerprint profile used when stealth mode is enabled."
+    },
     "provider": {
       "type": "string",
       "description": "Provider to use, such as 'ios'."

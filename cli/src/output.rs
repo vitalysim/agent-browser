@@ -3091,6 +3091,10 @@ Options:
   --args <args>              Browser launch args, comma or newline separated (or AGENT_BROWSER_ARGS)
                              e.g., --args "--no-sandbox,--disable-blink-features=AutomationControlled"
   --user-agent <ua>          Custom User-Agent (or AGENT_BROWSER_USER_AGENT)
+  --stealth                  Enable stealth launch flags and runtime fingerprint patches
+                             (or AGENT_BROWSER_STEALTH)
+  --stealth-profile <name>   Stealth profile: chrome-windows, chrome-mac, chrome-linux,
+                             mobile-android, mobile-ios (or AGENT_BROWSER_STEALTH_PROFILE)
   --proxy <server>           Proxy server URL (or AGENT_BROWSER_PROXY, HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)
                              Supports authenticated proxies: --proxy "http://user:pass@127.0.0.1:7890"
   --proxy-bypass <hosts>     Bypass proxy for these hosts (or AGENT_BROWSER_PROXY_BYPASS, NO_PROXY)

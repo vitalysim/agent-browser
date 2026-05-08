@@ -59,6 +59,8 @@ pub(super) fn check(checks: &mut Vec<Check>) {
         enable: &[],
         args: None,
         user_agent: None,
+        stealth: false,
+        stealth_profile: None,
         proxy: None,
         proxy_bypass: None,
         proxy_username: None,

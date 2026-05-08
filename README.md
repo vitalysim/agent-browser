@@ -706,6 +706,8 @@ This is useful for multimodal AI models that can reason about visual layout, unl
 | `--enable <feature>` | Built-in init scripts: `react-devtools` (repeatable or comma-list; or `AGENT_BROWSER_ENABLE` env) |
 | `--args <args>` | Browser launch args, comma or newline separated (or `AGENT_BROWSER_ARGS` env) |
 | `--user-agent <ua>` | Custom User-Agent string (or `AGENT_BROWSER_USER_AGENT` env) |
+| `--stealth` | Enable stealth launch flags and runtime fingerprint patches (or `AGENT_BROWSER_STEALTH` env) |
+| `--stealth-profile <name>` | Stealth profile: `chrome-windows`, `chrome-mac`, `chrome-linux`, `mobile-android`, `mobile-ios` (or `AGENT_BROWSER_STEALTH_PROFILE` env) |
 | `--proxy <url>` | Proxy server URL with optional auth (or `AGENT_BROWSER_PROXY` env) |
 | `--proxy-bypass <hosts>` | Hosts to bypass proxy (or `AGENT_BROWSER_PROXY_BYPASS` env) |
 | `--ignore-https-errors` | Ignore HTTPS certificate errors (useful for self-signed certs) |
@@ -1401,6 +1403,8 @@ Optional configuration via environment variables:
 | `BROWSERLESS_TTL`          | Session TTL in milliseconds                      | `300000`                                |
 | `BROWSERLESS_STEALTH`      | Enable stealth mode (`true`/`false`)             | `true`                                  |
 
+The global `--stealth` flag or `AGENT_BROWSER_STEALTH` env var takes precedence over the provider-specific Browserless stealth setting.
+
 When enabled, agent-browser connects to a Browserless cloud session instead of launching a local browser. All commands work identically.
 
 Get your API token from the [Browserless Dashboard](https://browserless.io).
@@ -1478,6 +1482,8 @@ Optional configuration via environment variables:
 | `KERNEL_STEALTH`         | Enable stealth mode to avoid bot detection (`true`/`false`)                      | `true`  |
 | `KERNEL_TIMEOUT_SECONDS` | Session timeout in seconds                                                       | `300`   |
 | `KERNEL_PROFILE_NAME`    | Browser profile name for persistent cookies/logins (created if it doesn't exist) | (none)  |
+
+The global `--stealth` flag or `AGENT_BROWSER_STEALTH` env var takes precedence over the provider-specific Kernel stealth setting.
 
 When enabled, agent-browser connects to a Kernel cloud session instead of launching a local browser. All commands work identically.
 

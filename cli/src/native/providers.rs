@@ -6,6 +6,14 @@
 use serde_json::{json, Value};
 use std::env;
 
+use super::stealth::StealthConfig;
+
+fn env_bool(name: &str) -> Option<bool> {
+    env::var(name)
+        .ok()
+        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+}
+
 /// Provider session info for cleanup on failure.
 #[derive(Debug)]
 pub struct ProviderSession {
@@ -23,7 +31,10 @@ pub struct ProviderConnection {
 
 /// Connects to the specified browser provider and returns a CDP WebSocket URL
 /// along with session info for cleanup on failure.
-pub async fn connect_provider(provider_name: &str) -> Result<ProviderConnection, String> {
+pub async fn connect_provider(
+    provider_name: &str,
+    stealth: Option<&StealthConfig>,
+) -> Result<ProviderConnection, String> {
     match provider_name.to_lowercase().as_str() {
         "browserbase" => {
             let (url, session) = connect_browserbase().await?;
@@ -34,7 +45,7 @@ pub async fn connect_provider(provider_name: &str) -> Result<ProviderConnection,
             })
         }
         "browserless" => {
-            let (url, session) = connect_browserless().await?;
+            let (url, session) = connect_browserless(stealth).await?;
             Ok(ProviderConnection {
                 ws_url: url,
                 session,
@@ -50,7 +61,7 @@ pub async fn connect_provider(provider_name: &str) -> Result<ProviderConnection,
             })
         }
         "kernel" => {
-            let (url, session) = connect_kernel().await?;
+            let (url, session) = connect_kernel(stealth).await?;
             Ok(ProviderConnection {
                 ws_url: url,
                 session,
@@ -183,7 +194,9 @@ async fn connect_browserbase() -> Result<(String, Option<ProviderSession>), Stri
     ))
 }
 
-async fn connect_browserless() -> Result<(String, Option<ProviderSession>), String> {
+async fn connect_browserless(
+    stealth_config: Option<&StealthConfig>,
+) -> Result<(String, Option<ProviderSession>), String> {
     let api_key = env::var("BROWSERLESS_API_KEY")
         .map_err(|_| "BROWSERLESS_API_KEY environment variable is not set")?;
 
@@ -205,8 +218,14 @@ async fn connect_browserless() -> Result<(String, Option<ProviderSession>), Stri
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(300000);
-    let stealth = env::var("BROWSERLESS_STEALTH")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    let stealth = stealth_config
+        .map(|config| config.enabled)
+        .or_else(|| env_bool("AGENT_BROWSER_STEALTH"))
+        .or_else(|| {
+            env::var("BROWSERLESS_STEALTH")
+                .ok()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        })
         .unwrap_or(true);
 
     let url = format!("{}/session", api_url.trim_end_matches('/'));
@@ -273,7 +292,9 @@ async fn connect_browser_use() -> Result<(String, Option<ProviderSession>), Stri
     Ok((ws_url, None))
 }
 
-async fn connect_kernel() -> Result<(String, Option<ProviderSession>), String> {
+async fn connect_kernel(
+    stealth_config: Option<&StealthConfig>,
+) -> Result<(String, Option<ProviderSession>), String> {
     let api_key = env::var("KERNEL_API_KEY").ok();
     let endpoint =
         env::var("KERNEL_ENDPOINT").unwrap_or_else(|_| "https://api.onkernel.com".to_string());
@@ -283,8 +304,14 @@ async fn connect_kernel() -> Result<(String, Option<ProviderSession>), String> {
     let headless = env::var("KERNEL_HEADLESS")
         .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
         .unwrap_or(true);
-    let stealth = env::var("KERNEL_STEALTH")
-        .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+    let stealth = stealth_config
+        .map(|config| config.enabled)
+        .or_else(|| env_bool("AGENT_BROWSER_STEALTH"))
+        .or_else(|| {
+            env::var("KERNEL_STEALTH")
+                .ok()
+                .map(|v| v == "1" || v.eq_ignore_ascii_case("true"))
+        })
         .unwrap_or(false);
     let timeout_seconds = env::var("KERNEL_TIMEOUT_SECONDS")
         .ok()
@@ -754,7 +781,7 @@ mod tests {
     #[test]
     fn test_connect_provider_unknown() {
         let rt = tokio::runtime::Runtime::new().unwrap();
-        let result = rt.block_on(connect_provider("unknown-provider"));
+        let result = rt.block_on(connect_provider("unknown-provider", None));
         assert!(result.is_err());
         assert!(result.unwrap_err().contains("Unknown provider"));
     }

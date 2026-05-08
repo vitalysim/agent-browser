@@ -33,6 +33,7 @@ use super::recording::{self, RecordingState};
 use super::screenshot::{self, ScreenshotOptions};
 use super::snapshot::{self, SnapshotOptions};
 use super::state;
+use super::stealth;
 use super::storage;
 use super::stream::{self, StreamServer};
 use super::tracing::{self as native_tracing, TracingState};
@@ -196,6 +197,7 @@ fn launch_hash(opts: &LaunchOptions) -> u64 {
     opts.proxy_password.hash(&mut h);
     opts.user_agent.hash(&mut h);
     opts.allow_file_access.hash(&mut h);
+    opts.stealth.hash(&mut h);
     h.finish()
 }
 
@@ -260,6 +262,10 @@ pub struct DaemonState {
     /// Last viewport settings (width, height, deviceScaleFactor, mobile),
     /// re-applied to new contexts (e.g., recording).
     pub viewport: Option<(i32, i32, f64, bool)>,
+    /// Stealth-mode configuration for the current browser session.
+    pub stealth: Option<stealth::StealthConfig>,
+    /// User-Agent that should be applied via CDP after attaching to a browser.
+    pub launch_user_agent: Option<String>,
 }
 
 impl DaemonState {
@@ -314,6 +320,8 @@ impl DaemonState {
                 .and_then(|s| s.parse::<u64>().ok())
                 .unwrap_or(30_000),
             viewport: None,
+            stealth: stealth::config_from_env(),
+            launch_user_agent: None,
         }
     }
 
@@ -1515,6 +1523,14 @@ async fn connect_auto_with_fresh_tab() -> Result<BrowserManager, String> {
 async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
     let mut options = launch_options_from_env();
 
+    if options.user_agent.is_none() {
+        if let Some(ref stealth_config) = options.stealth {
+            options.user_agent = Some(stealth::user_agent(stealth_config));
+        }
+    }
+    state.stealth = options.stealth.clone();
+    state.launch_user_agent = options.user_agent.clone();
+
     // Use the stream server's viewport dimensions for --window-size so the
     // content area matches the desired viewport from the start.
     if let Some(ref server) = state.stream_server {
@@ -1574,7 +1590,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         let p = provider.to_lowercase();
         // ios/safari are device providers handled via explicit launch command
         if !p.is_empty() && p != "ios" && p != "safari" {
-            let conn = providers::connect_provider(&p).await?;
+            let conn = providers::connect_provider(&p, state.stealth.as_ref()).await?;
             let ws_headers = if p == "agentcore" {
                 providers::take_agentcore_ws_headers()
             } else {
@@ -1645,6 +1661,47 @@ async fn apply_launch_init_scripts(state: &DaemonState) {
     let Some(mgr) = state.browser.as_ref() else {
         return;
     };
+
+    if let Ok(session_id) = mgr.active_session_id() {
+        if let Some(ref ua) = state.launch_user_agent {
+            let mut params = json!({ "userAgent": ua });
+            if let Some(ref stealth_config) = state.stealth {
+                if *ua == stealth::user_agent(stealth_config) {
+                    params["acceptLanguage"] = json!(stealth::accept_language(stealth_config));
+                    params["platform"] = json!(stealth::user_agent_platform(stealth_config));
+                    if let Some(metadata) = stealth::user_agent_metadata(stealth_config) {
+                        params["userAgentMetadata"] = metadata;
+                    }
+                }
+            }
+            let _ = mgr
+                .client
+                .send_command(
+                    "Emulation.setUserAgentOverride",
+                    Some(params),
+                    Some(session_id),
+                )
+                .await;
+        }
+
+        if let Some(ref stealth_config) = state.stealth {
+            let headers = stealth::client_hint_headers(stealth_config);
+            if !headers.is_empty() {
+                let _ = network::set_extra_headers(&mgr.client, session_id, &headers).await;
+                for iframe_session in state.iframe_sessions.values() {
+                    let _ = network::set_extra_headers(&mgr.client, iframe_session, &headers).await;
+                }
+            }
+        }
+    }
+
+    if let Some(ref stealth_config) = state.stealth {
+        let source = stealth::init_script(stealth_config);
+        if !source.is_empty() {
+            let _ = mgr.add_script_to_evaluate(&source).await;
+            let _ = mgr.evaluate(&source, None).await;
+        }
+    }
 
     // Built-in features via --enable / AGENT_BROWSER_ENABLE.
     if let Ok(raw) = env::var("AGENT_BROWSER_ENABLE") {
@@ -1724,6 +1781,7 @@ fn launch_options_from_env() -> LaunchOptions {
         download_path: env::var("AGENT_BROWSER_DOWNLOAD_PATH").ok(),
         viewport_size: None,
         use_real_keychain: false,
+        stealth: stealth::config_from_env(),
     }
 }
 
@@ -1765,6 +1823,8 @@ async fn rollback_failed_launch(state: &mut DaemonState) -> Result<(), String> {
     };
 
     state.launch_hash = None;
+    state.stealth = None;
+    state.launch_user_agent = None;
     state.screencasting = false;
     state.reset_input_state();
     state.ref_map.clear();
@@ -1823,6 +1883,17 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         });
     let storage_state = cmd.get("storageState").and_then(|v| v.as_str());
     let storage_state_owned = storage_state.map(|s| s.to_string());
+    let stealth_config = stealth::config_from_command(cmd);
+    let mut launch_user_agent = cmd
+        .get("userAgent")
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .or_else(|| env::var("AGENT_BROWSER_USER_AGENT").ok());
+    if launch_user_agent.is_none() {
+        if let Some(ref config) = stealth_config {
+            launch_user_agent = Some(stealth::user_agent(config));
+        }
+    }
 
     let launch_options = LaunchOptions {
         headless,
@@ -1874,10 +1945,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
             .unwrap_or_default(),
         extensions,
         storage_state: storage_state.map(String::from),
-        user_agent: cmd
-            .get("userAgent")
-            .and_then(|v| v.as_str())
-            .map(String::from),
+        user_agent: launch_user_agent.clone(),
         ignore_https_errors: cmd
             .get("ignoreHTTPSErrors")
             .and_then(|v| v.as_bool())
@@ -1892,7 +1960,10 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
             .map(String::from),
         viewport_size: None,
         use_real_keychain: false,
+        stealth: stealth_config.clone(),
     };
+    state.stealth = stealth_config;
+    state.launch_user_agent = launch_user_agent;
 
     let new_hash = launch_hash(&launch_options);
 
@@ -1983,7 +2054,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
                 return launch_safari(cmd, state).await;
             }
             _ => {
-                let conn = providers::connect_provider(provider).await?;
+                let conn = providers::connect_provider(provider, state.stealth.as_ref()).await?;
 
                 let ws_headers = if provider.eq_ignore_ascii_case("agentcore") {
                     providers::take_agentcore_ws_headers()

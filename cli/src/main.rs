@@ -735,6 +735,8 @@ fn main() {
         enable: &flags.enable,
         args: flags.args.as_deref(),
         user_agent: flags.user_agent.as_deref(),
+        stealth: flags.stealth,
+        stealth_profile: flags.stealth_profile.as_deref(),
         proxy: proxy_server.as_deref(),
         proxy_bypass: flags.proxy_bypass.as_deref(),
         proxy_username: proxy_username.as_deref(),
@@ -798,6 +800,16 @@ fn main() {
             if flags.cli_args { Some("--args") } else { None },
             if flags.cli_user_agent {
                 Some("--user-agent")
+            } else {
+                None
+            },
+            if flags.cli_stealth {
+                Some("--stealth")
+            } else {
+                None
+            },
+            if flags.cli_stealth_profile {
+                Some("--stealth-profile")
             } else {
                 None
             },
@@ -903,6 +915,18 @@ fn main() {
             launch_cmd["downloadPath"] = json!(dp);
         }
 
+        if let Some(ref ua) = flags.user_agent {
+            launch_cmd["userAgent"] = json!(ua);
+        }
+
+        if flags.stealth || flags.cli_stealth {
+            launch_cmd["stealth"] = json!(flags.stealth);
+        }
+
+        if let Some(ref profile) = flags.stealth_profile {
+            launch_cmd["stealthProfile"] = json!(profile);
+        }
+
         let err = match send_command(launch_cmd, &flags.session) {
             Ok(resp) if resp.success => None,
             Ok(resp) => Some(
@@ -999,6 +1023,18 @@ fn main() {
                 launch_cmd["downloadPath"] = json!(dp);
             }
 
+            if let Some(ref ua) = flags.user_agent {
+                launch_cmd["userAgent"] = json!(ua);
+            }
+
+            if flags.stealth || flags.cli_stealth {
+                launch_cmd["stealth"] = json!(flags.stealth);
+            }
+
+            if let Some(ref profile) = flags.stealth_profile {
+                launch_cmd["stealthProfile"] = json!(profile);
+            }
+
             let err = match send_command(launch_cmd, &flags.session) {
                 Ok(resp) if resp.success => None,
                 Ok(resp) => Some(
@@ -1033,6 +1069,18 @@ fn main() {
                 launch_cmd["colorScheme"] = json!(cs);
             }
 
+            if let Some(ref ua) = flags.user_agent {
+                launch_cmd["userAgent"] = json!(ua);
+            }
+
+            if flags.stealth || flags.cli_stealth {
+                launch_cmd["stealth"] = json!(flags.stealth);
+            }
+
+            if let Some(ref profile) = flags.stealth_profile {
+                launch_cmd["stealthProfile"] = json!(profile);
+            }
+
             let err = match send_command(launch_cmd, &flags.session) {
                 Ok(resp) if resp.success => None,
                 Ok(resp) => Some(
@@ -1062,6 +1110,8 @@ fn main() {
         || flags.proxy.is_some()
         || flags.args.is_some()
         || flags.user_agent.is_some()
+        || flags.stealth
+        || flags.cli_stealth
         || flags.allow_file_access
         || flags.color_scheme.is_some()
         || flags.download_path.is_some()
@@ -1113,6 +1163,14 @@ fn main() {
 
         if let Some(ref ua) = flags.user_agent {
             cmd_obj.insert("userAgent".to_string(), json!(ua));
+        }
+
+        if flags.stealth || flags.cli_stealth {
+            cmd_obj.insert("stealth".to_string(), json!(flags.stealth));
+        }
+
+        if let Some(ref profile) = flags.stealth_profile {
+            cmd_obj.insert("stealthProfile".to_string(), json!(profile));
         }
 
         if let Some(ref a) = flags.args {

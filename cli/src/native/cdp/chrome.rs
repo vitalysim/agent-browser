@@ -3,6 +3,8 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 
+use crate::native::stealth::{self, StealthConfig};
+
 use super::discovery::discover_cdp_url;
 
 pub struct ChromeProcess {
@@ -110,6 +112,8 @@ pub struct LaunchOptions {
     /// Chrome uses the real system keychain. Set automatically when launching
     /// with a copied Chrome profile.
     pub use_real_keychain: bool,
+    /// Optional stealth-mode launch/runtime configuration.
+    pub stealth: Option<StealthConfig>,
 }
 
 impl Default for LaunchOptions {
@@ -132,6 +136,7 @@ impl Default for LaunchOptions {
             download_path: None,
             viewport_size: None,
             use_real_keychain: false,
+            stealth: None,
         }
     }
 }
@@ -220,9 +225,28 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
         }
     }
 
+    if let Some(ref stealth_config) = options.stealth {
+        args.extend(stealth::chrome_args(
+            stealth_config,
+            options.headless,
+            has_extensions,
+        ));
+    }
+
+    if let Some(ref ua) = options.user_agent {
+        let has_user_agent_arg = args
+            .iter()
+            .chain(options.args.iter())
+            .any(|a| a.starts_with("--user-agent="));
+        if !has_user_agent_arg {
+            args.push(format!("--user-agent={}", ua));
+        }
+    }
+
     let has_window_size = options
         .args
         .iter()
+        .chain(args.iter())
         .any(|a| a.starts_with("--start-maximized") || a.starts_with("--window-size="));
 
     if !has_window_size && options.headless && !has_extensions {
@@ -247,21 +271,32 @@ fn build_chrome_args(options: &LaunchOptions) -> Result<ChromeArgs, String> {
     })
 }
 
+fn chrome_not_found_message() -> String {
+    let cache_dir = crate::install::get_browsers_dir();
+    format!(
+        "Chrome not found. Checked:\n  \
+         - agent-browser cache: {}\n  \
+         - System Chrome installations\n  \
+         - Puppeteer browser cache\n  \
+         - Playwright browser cache\n\
+         Run `agent-browser install` to download Chrome, or use --executable-path.",
+        cache_dir.display()
+    )
+}
+
 pub fn launch_chrome(options: &LaunchOptions) -> Result<ChromeProcess, String> {
     let chrome_path = match &options.executable_path {
         Some(p) => PathBuf::from(p),
-        None => find_chrome().ok_or_else(|| {
-            let cache_dir = crate::install::get_browsers_dir();
-            format!(
-                "Chrome not found. Checked:\n  \
-                 - agent-browser cache: {}\n  \
-                 - System Chrome installations\n  \
-                 - Puppeteer browser cache\n  \
-                 - Playwright browser cache\n\
-                 Run `agent-browser install` to download Chrome, or use --executable-path.",
-                cache_dir.display()
-            )
-        })?,
+        None if options
+            .stealth
+            .as_ref()
+            .is_some_and(|config| config.use_system_chrome) =>
+        {
+            stealth::system_chrome_path()
+                .or_else(find_chrome)
+                .ok_or_else(chrome_not_found_message)?
+        }
+        None => find_chrome().ok_or_else(chrome_not_found_message)?,
     };
 
     // Profile name preprocessing: if --profile is a Chrome profile name (not a
