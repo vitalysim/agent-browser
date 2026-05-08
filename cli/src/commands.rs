@@ -2697,6 +2697,7 @@ mod tests {
             user_agent: None,
             stealth: false,
             stealth_profile: None,
+            stealth_options: crate::flags::StealthOptionsConfig::default(),
             provider: None,
             ignore_https_errors: false,
             allow_file_access: false,

@@ -395,6 +395,7 @@ pub struct DaemonOptions<'a> {
     pub user_agent: Option<&'a str>,
     pub stealth: bool,
     pub stealth_profile: Option<&'a str>,
+    pub stealth_options: &'a crate::flags::StealthOptionsConfig,
     pub proxy: Option<&'a str>,
     pub proxy_bypass: Option<&'a str>,
     pub proxy_username: Option<&'a str>,
@@ -452,6 +453,39 @@ fn apply_daemon_env(cmd: &mut Command, session: &str, opts: &DaemonOptions) {
     );
     if let Some(profile) = opts.stealth_profile {
         cmd.env("AGENT_BROWSER_STEALTH_PROFILE", profile);
+    }
+    if let Some(value) = opts.stealth_options.block_webrtc {
+        cmd.env(
+            "AGENT_BROWSER_STEALTH_BLOCK_WEBRTC",
+            if value { "1" } else { "0" },
+        );
+    }
+    if let Some(value) = opts.stealth_options.use_system_chrome {
+        cmd.env(
+            "AGENT_BROWSER_STEALTH_USE_SYSTEM_CHROME",
+            if value { "1" } else { "0" },
+        );
+    }
+    if let Some(value) = opts.stealth_options.client_hints {
+        cmd.env(
+            "AGENT_BROWSER_STEALTH_CLIENT_HINTS",
+            if value { "1" } else { "0" },
+        );
+    }
+    if let Some(ref value) = opts.stealth_options.client_hints_mode {
+        cmd.env("AGENT_BROWSER_STEALTH_CLIENT_HINTS_MODE", value);
+    }
+    if let Some(value) = opts.stealth_options.input_coordinates {
+        cmd.env(
+            "AGENT_BROWSER_STEALTH_INPUT_COORDINATES",
+            if value { "1" } else { "0" },
+        );
+    }
+    if let Some(ref value) = opts.stealth_options.input_realism {
+        cmd.env("AGENT_BROWSER_STEALTH_INPUT_REALISM", value);
+    }
+    if let Some(ref value) = opts.stealth_options.typing_realism {
+        cmd.env("AGENT_BROWSER_STEALTH_TYPING_REALISM", value);
     }
     if let Some(p) = opts.proxy {
         cmd.env("AGENT_BROWSER_PROXY", p);

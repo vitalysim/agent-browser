@@ -17,7 +17,12 @@ pub struct StealthConfig {
     pub block_webrtc: bool,
     pub use_system_chrome: bool,
     pub client_hints: bool,
+    pub client_hints_mode: ClientHintsMode,
     pub input_coordinates: bool,
+    pub input_realism: InputRealismMode,
+    pub typing_realism: TypingRealismMode,
+    pub chrome_major_version: Option<String>,
+    pub chrome_full_version: Option<String>,
 }
 
 impl StealthConfig {
@@ -32,8 +37,76 @@ impl StealthConfig {
             block_webrtc: true,
             use_system_chrome: false,
             client_hints: true,
+            client_hints_mode: ClientHintsMode::AcceptCh,
             input_coordinates: true,
+            input_realism: InputRealismMode::Balanced,
+            typing_realism: TypingRealismMode::Off,
+            chrome_major_version: None,
+            chrome_full_version: None,
         })
+    }
+
+    pub fn apply_browser_version(&mut self, product: Option<&str>, user_agent: Option<&str>) {
+        if let Some((major, full)) = parse_chrome_version(product, user_agent) {
+            self.chrome_major_version = Some(major);
+            self.chrome_full_version = Some(full);
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ClientHintsMode {
+    /// Send only low-entropy UA-CH headers. This is also the network default
+    /// for Accept-CH mode until an origin explicitly asks for high entropy.
+    LowEntropy,
+    /// Balanced mode: low-entropy HTTP headers and full JS/CDP metadata.
+    AcceptCh,
+    /// Send full high-entropy UA-CH headers globally. Useful only in lab tests.
+    Full,
+}
+
+impl ClientHintsMode {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "low-entropy" | "low" => Some(Self::LowEntropy),
+            "accept-ch" | "accept_ch" | "balanced" => Some(Self::AcceptCh),
+            "full" => Some(Self::Full),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum InputRealismMode {
+    Off,
+    Balanced,
+    Aggressive,
+}
+
+impl InputRealismMode {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "off" | "false" | "0" => Some(Self::Off),
+            "balanced" | "true" | "1" => Some(Self::Balanced),
+            "aggressive" => Some(Self::Aggressive),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum TypingRealismMode {
+    Off,
+    Balanced,
+}
+
+impl TypingRealismMode {
+    fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "off" | "false" | "0" => Some(Self::Off),
+            "balanced" | "true" | "1" => Some(Self::Balanced),
+            _ => None,
+        }
     }
 }
 
@@ -88,6 +161,8 @@ fn brand(brand: &str, version: &str) -> BrandVersion {
 }
 
 fn chrome_client_hints(
+    major_version: &str,
+    full_version: &str,
     platform: &str,
     platform_version: &str,
     architecture: &str,
@@ -97,13 +172,13 @@ fn chrome_client_hints(
 ) -> ClientHintsData {
     ClientHintsData {
         brands: vec![
-            brand("Chromium", "144"),
-            brand("Google Chrome", "144"),
+            brand("Chromium", major_version),
+            brand("Google Chrome", major_version),
             brand("Not_A Brand", "24"),
         ],
         full_version_list: vec![
-            brand("Chromium", "144.0.7559.97"),
-            brand("Google Chrome", "144.0.7559.97"),
+            brand("Chromium", full_version),
+            brand("Google Chrome", full_version),
             brand("Not_A Brand", "24.0.0.0"),
         ],
         mobile,
@@ -138,12 +213,110 @@ pub fn profile(name: Option<&str>) -> StealthProfile {
     }
 }
 
+pub fn profile_for_config(config: &StealthConfig) -> StealthProfile {
+    let mut profile = profile(config.profile_name.as_deref());
+    let Some(ref full_version) = config.chrome_full_version else {
+        return profile;
+    };
+    let major_version = config
+        .chrome_major_version
+        .as_deref()
+        .or_else(|| full_version.split('.').next())
+        .unwrap_or("144");
+
+    profile.user_agent = rewrite_chrome_version(&profile.user_agent, full_version);
+    if let Some(ref mut hints) = profile.client_hints {
+        rewrite_brand_versions(&mut hints.brands, major_version, "24");
+        rewrite_brand_versions(&mut hints.full_version_list, full_version, "24.0.0.0");
+    }
+
+    profile
+}
+
+fn parse_chrome_version(
+    product: Option<&str>,
+    user_agent: Option<&str>,
+) -> Option<(String, String)> {
+    for source in [product, user_agent].into_iter().flatten() {
+        if let Some(version) = extract_version_after(source, "Chrome/") {
+            return Some(chrome_version_pair(&version));
+        }
+        if let Some(version) = extract_version_after(source, "Chromium/") {
+            return Some(chrome_version_pair(&version));
+        }
+        if let Some(version) = source.strip_prefix("Chrome/") {
+            return Some(chrome_version_pair(version));
+        }
+        if let Some(version) = source.strip_prefix("Chromium/") {
+            return Some(chrome_version_pair(version));
+        }
+    }
+    None
+}
+
+fn extract_version_after(source: &str, marker: &str) -> Option<String> {
+    let start = source.find(marker)? + marker.len();
+    let version = source[start..]
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == '.')
+        .collect::<String>();
+    if version.is_empty() {
+        None
+    } else {
+        Some(version)
+    }
+}
+
+fn chrome_version_pair(version: &str) -> (String, String) {
+    let full = version.to_string();
+    let major = version
+        .split('.')
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or("144")
+        .to_string();
+    (major, full)
+}
+
+fn rewrite_chrome_version(user_agent: &str, full_version: &str) -> String {
+    let Some(start) = user_agent.find("Chrome/") else {
+        return user_agent.to_string();
+    };
+    let version_start = start + "Chrome/".len();
+    let version_end = user_agent[version_start..]
+        .find(' ')
+        .map(|offset| version_start + offset)
+        .unwrap_or(user_agent.len());
+    format!(
+        "{}{}{}",
+        &user_agent[..version_start],
+        full_version,
+        &user_agent[version_end..]
+    )
+}
+
+fn rewrite_brand_versions(
+    brands: &mut [BrandVersion],
+    chrome_version: &str,
+    not_brand_version: &str,
+) {
+    for brand in brands {
+        if brand.brand == "Chromium" || brand.brand == "Google Chrome" {
+            brand.version = chrome_version.to_string();
+        } else if brand.brand == "Not_A Brand" {
+            brand.version = not_brand_version.to_string();
+        }
+    }
+}
+
 pub fn config_from_env() -> Option<StealthConfig> {
     let enabled = env_bool("AGENT_BROWSER_STEALTH").unwrap_or(false);
     let profile_name = env::var("AGENT_BROWSER_STEALTH_PROFILE")
         .ok()
         .filter(|s| !s.is_empty());
-    StealthConfig::new(enabled, profile_name)
+    let mut config = StealthConfig::new(enabled, profile_name)?;
+    apply_env_overrides(&mut config);
+    Some(config)
 }
 
 pub fn config_from_command(cmd: &Value) -> Option<StealthConfig> {
@@ -175,12 +348,65 @@ pub fn config_from_command(cmd: &Value) -> Option<StealthConfig> {
         if let Some(v) = options.get("clientHints").and_then(|v| v.as_bool()) {
             config.client_hints = v;
         }
+        if let Some(v) = options
+            .get("clientHintsMode")
+            .and_then(|v| v.as_str())
+            .and_then(ClientHintsMode::from_str)
+        {
+            config.client_hints_mode = v;
+        }
         if let Some(v) = options.get("inputCoordinates").and_then(|v| v.as_bool()) {
             config.input_coordinates = v;
         }
+        if let Some(v) = options
+            .get("inputRealism")
+            .and_then(|v| v.as_str())
+            .and_then(InputRealismMode::from_str)
+        {
+            config.input_realism = v;
+        }
+        if let Some(v) = options
+            .get("typingRealism")
+            .and_then(|v| v.as_str())
+            .and_then(TypingRealismMode::from_str)
+        {
+            config.typing_realism = v;
+        }
     }
 
+    apply_env_overrides(&mut config);
+
     Some(config)
+}
+
+fn apply_env_overrides(config: &mut StealthConfig) {
+    if let Some(v) = env_bool("AGENT_BROWSER_STEALTH_BLOCK_WEBRTC") {
+        config.block_webrtc = v;
+    }
+    if let Some(v) = env_bool("AGENT_BROWSER_STEALTH_USE_SYSTEM_CHROME") {
+        config.use_system_chrome = v;
+    }
+    if let Some(v) = env_bool("AGENT_BROWSER_STEALTH_CLIENT_HINTS") {
+        config.client_hints = v;
+    }
+    if let Ok(v) = env::var("AGENT_BROWSER_STEALTH_CLIENT_HINTS_MODE") {
+        if let Some(mode) = ClientHintsMode::from_str(&v) {
+            config.client_hints_mode = mode;
+        }
+    }
+    if let Some(v) = env_bool("AGENT_BROWSER_STEALTH_INPUT_COORDINATES") {
+        config.input_coordinates = v;
+    }
+    if let Ok(v) = env::var("AGENT_BROWSER_STEALTH_INPUT_REALISM") {
+        if let Some(mode) = InputRealismMode::from_str(&v) {
+            config.input_realism = mode;
+        }
+    }
+    if let Ok(v) = env::var("AGENT_BROWSER_STEALTH_TYPING_REALISM") {
+        if let Some(mode) = TypingRealismMode::from_str(&v) {
+            config.typing_realism = mode;
+        }
+    }
 }
 
 fn env_bool(name: &str) -> Option<bool> {
@@ -193,7 +419,7 @@ fn env_bool(name: &str) -> Option<bool> {
 }
 
 pub fn user_agent(config: &StealthConfig) -> String {
-    profile(config.profile_name.as_deref()).user_agent
+    profile_for_config(config).user_agent
 }
 
 pub fn client_hint_headers(config: &StealthConfig) -> HashMap<String, String> {
@@ -201,7 +427,7 @@ pub fn client_hint_headers(config: &StealthConfig) -> HashMap<String, String> {
         return HashMap::new();
     }
 
-    let Some(hints) = profile(config.profile_name.as_deref()).client_hints else {
+    let Some(hints) = profile_for_config(config).client_hints else {
         return HashMap::new();
     };
 
@@ -215,6 +441,11 @@ pub fn client_hint_headers(config: &StealthConfig) -> HashMap<String, String> {
         "sec-ch-ua-platform".to_string(),
         quote_header(&hints.platform),
     );
+
+    if config.client_hints_mode != ClientHintsMode::Full {
+        return headers;
+    }
+
     headers.insert(
         "sec-ch-ua-arch".to_string(),
         quote_header(&hints.architecture),
@@ -240,7 +471,7 @@ pub fn user_agent_metadata(config: &StealthConfig) -> Option<Value> {
         return None;
     }
 
-    let hints = profile(config.profile_name.as_deref()).client_hints?;
+    let hints = profile_for_config(config).client_hints?;
     Some(json!({
         "brands": hints.brands,
         "fullVersionList": hints.full_version_list,
@@ -254,11 +485,11 @@ pub fn user_agent_metadata(config: &StealthConfig) -> Option<Value> {
 }
 
 pub fn user_agent_platform(config: &StealthConfig) -> String {
-    profile(config.profile_name.as_deref()).platform
+    profile_for_config(config).platform
 }
 
 pub fn accept_language(config: &StealthConfig) -> String {
-    let p = profile(config.profile_name.as_deref());
+    let p = profile_for_config(config);
     if p.languages.is_empty() {
         return "en-US,en;q=0.9".to_string();
     }
@@ -292,7 +523,7 @@ pub fn chrome_args(config: &StealthConfig, headless: bool, has_extensions: bool)
         return Vec::new();
     }
 
-    let p = profile(config.profile_name.as_deref());
+    let p = profile_for_config(config);
     let mut args = vec![
         "--disable-blink-features=AutomationControlled".to_string(),
         "--disable-component-extensions-with-background-pages".to_string(),
@@ -341,7 +572,7 @@ pub fn init_script(config: &StealthConfig) -> String {
         return String::new();
     }
 
-    let p = profile(config.profile_name.as_deref());
+    let p = profile_for_config(config);
     let profile_json = serde_json::to_string(&p).unwrap_or_else(|_| "{}".to_string());
     let client_hints_json = p
         .client_hints
@@ -460,7 +691,14 @@ fn chrome_windows_profile() -> StealthProfile {
             "ANGLE (NVIDIA, NVIDIA GeForce GTX 1080 Direct3D11 vs_5_0 ps_5_0)".to_string(),
         fingerprint_seed: 0x7f3c2d1e,
         client_hints: Some(chrome_client_hints(
-            "Windows", "15.0.0", "x86", "64", "", false,
+            "144",
+            "144.0.7559.97",
+            "Windows",
+            "15.0.0",
+            "x86",
+            "64",
+            "",
+            false,
         )),
     }
 }
@@ -488,7 +726,14 @@ fn chrome_mac_profile() -> StealthProfile {
             "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)".to_string(),
         fingerprint_seed: 0x4a5b6c7d,
         client_hints: Some(chrome_client_hints(
-            "macOS", "10.15.7", "arm", "64", "", false,
+            "144",
+            "144.0.7559.97",
+            "macOS",
+            "10.15.7",
+            "arm",
+            "64",
+            "",
+            false,
         )),
     }
 }
@@ -516,7 +761,14 @@ fn chrome_linux_profile() -> StealthProfile {
             "ANGLE (Intel, Mesa Intel(R) UHD Graphics 630 (CFL GT2), OpenGL 4.6)".to_string(),
         fingerprint_seed: 0x8e9f0a1b,
         client_hints: Some(chrome_client_hints(
-            "Linux", "6.5.0", "x86", "64", "", false,
+            "144",
+            "144.0.7559.97",
+            "Linux",
+            "6.5.0",
+            "x86",
+            "64",
+            "",
+            false,
         )),
     }
 }
@@ -543,7 +795,14 @@ fn mobile_android_profile() -> StealthProfile {
         webgl_renderer: "Adreno (TM) 750".to_string(),
         fingerprint_seed: 0x2c3d4e5f,
         client_hints: Some(chrome_client_hints(
-            "Android", "14.0.0", "", "", "Pixel 8", true,
+            "144",
+            "144.0.7559.97",
+            "Android",
+            "14.0.0",
+            "",
+            "",
+            "Pixel 8",
+            true,
         )),
     }
 }
@@ -1136,5 +1395,40 @@ mod tests {
             headers.get("sec-ch-ua-platform").map(String::as_str),
             Some("\"Windows\"")
         );
+        assert!(!headers.contains_key("sec-ch-ua-arch"));
+    }
+
+    #[test]
+    fn full_client_hint_mode_sends_high_entropy_headers() {
+        let mut config = StealthConfig::new(true, Some("chrome-windows".to_string())).unwrap();
+        config.client_hints_mode = ClientHintsMode::Full;
+        let headers = client_hint_headers(&config);
+        assert_eq!(
+            headers.get("sec-ch-ua-arch").map(String::as_str),
+            Some("\"x86\"")
+        );
+        assert!(headers.contains_key("sec-ch-ua-full-version-list"));
+    }
+
+    #[test]
+    fn browser_version_rewrites_user_agent_and_client_hints() {
+        let mut config = StealthConfig::new(true, Some("chrome-windows".to_string())).unwrap();
+        config.apply_browser_version(
+            Some("Chrome/145.0.7654.21"),
+            Some("Mozilla/5.0 Chrome/145.0.7654.21 Safari/537.36"),
+        );
+
+        let user_agent = user_agent(&config);
+        assert!(user_agent.contains("Chrome/145.0.7654.21"));
+
+        let metadata = user_agent_metadata(&config).unwrap();
+        let brands = metadata
+            .get("brands")
+            .and_then(|value| value.as_array())
+            .unwrap();
+        assert!(brands.iter().any(|brand| {
+            brand.get("brand").and_then(|value| value.as_str()) == Some("Google Chrome")
+                && brand.get("version").and_then(|value| value.as_str()) == Some("145")
+        }));
     }
 }

@@ -71,6 +71,9 @@ Every CLI flag can be set in the config file using its camelCase equivalent:
     <tr><td><code>proxyBypass</code></td><td><code>--proxy-bypass</code></td><td>string</td></tr>
     <tr><td><code>args</code></td><td><code>--args</code></td><td>string</td></tr>
     <tr><td><code>userAgent</code></td><td><code>--user-agent</code></td><td>string</td></tr>
+    <tr><td><code>stealth</code></td><td><code>--stealth</code></td><td>boolean</td></tr>
+    <tr><td><code>stealthProfile</code></td><td><code>--stealth-profile</code></td><td>string (<code>chrome-windows</code>, <code>chrome-mac</code>, <code>chrome-linux</code>, <code>mobile-android</code>, <code>mobile-ios</code>)</td></tr>
+    <tr><td><code>stealthOptions</code></td><td>Config/env only</td><td>object</td></tr>
     <tr><td><code>provider</code></td><td><code>-p, --provider</code></td><td>string</td></tr>
     <tr><td><code>device</code></td><td><code>--device</code></td><td>string</td></tr>
     <tr><td><code>ignoreHttpsErrors</code></td><td><code>--ignore-https-errors</code></td><td>boolean</td></tr>
@@ -118,6 +121,20 @@ Every CLI flag can be set in the config file using its camelCase equivalent:
 {
   "args": "--no-sandbox,--disable-gpu",
   "ignoreHttpsErrors": true
+}
+```
+
+### Authorized Browser Research
+
+```json
+{
+  "stealth": true,
+  "stealthProfile": "chrome-mac",
+  "stealthOptions": {
+    "clientHintsMode": "accept-ch",
+    "inputRealism": "balanced",
+    "typingRealism": "off"
+  }
 }
 ```
 
@@ -183,6 +200,15 @@ These environment variables configure additional daemon and runtime behavior:
     <tr><td><code>AGENT_BROWSER_ENCRYPTION_KEY</code></td><td>64-char hex key for AES-256-GCM session encryption.</td><td>(none)</td></tr>
     <tr><td><code>AGENT_BROWSER_EXTENSIONS</code></td><td>Comma-separated browser extension paths. Extensions work in both headed and headless mode.</td><td>(none)</td></tr>
     <tr><td><code>AGENT_BROWSER_HEADED</code></td><td>Show browser window instead of running headless (<code>1</code> to enable).</td><td>(disabled)</td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH</code></td><td>Enable stealth launch flags and runtime fingerprint patches.</td><td>(disabled)</td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_PROFILE</code></td><td>Stealth profile name.</td><td>Host OS profile</td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_CLIENT_HINTS_MODE</code></td><td>Client Hint header mode: <code>low-entropy</code>, <code>accept-ch</code>, <code>full</code>.</td><td><code>accept-ch</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_INPUT_REALISM</code></td><td>Mouse event realism mode: <code>off</code>, <code>balanced</code>, <code>aggressive</code>.</td><td><code>balanced</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_TYPING_REALISM</code></td><td>Reserved typing cadence mode: <code>off</code>, <code>balanced</code>.</td><td><code>off</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_BLOCK_WEBRTC</code></td><td>Apply WebRTC launch/runtime restrictions.</td><td><code>true</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_USE_SYSTEM_CHROME</code></td><td>Prefer system Chrome/Chromium when available.</td><td><code>false</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_CLIENT_HINTS</code></td><td>Apply User-Agent Client Hints metadata and headers.</td><td><code>true</code></td></tr>
+    <tr><td><code>AGENT_BROWSER_STEALTH_INPUT_COORDINATES</code></td><td>Patch page-observed click coordinate artifacts.</td><td><code>true</code></td></tr>
     <tr><td><code>AGENT_BROWSER_STREAM_PORT</code></td><td>Override the WebSocket streaming port. By default, an OS-assigned port is used. Set this to bind to a specific port (e.g., <code>9223</code>).</td><td>OS-assigned</td></tr>
     <tr><td><code>AGENT_BROWSER_IDLE_TIMEOUT_MS</code></td><td>Auto-shutdown the daemon after N ms of inactivity (no commands received). Useful for ephemeral environments.</td><td>(disabled)</td></tr>
     <tr><td><code>AGENT_BROWSER_IOS_DEVICE</code></td><td>Default iOS device name for the <code>ios</code> provider.</td><td>(none)</td></tr>

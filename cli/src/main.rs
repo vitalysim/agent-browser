@@ -123,6 +123,49 @@ fn parse_proxy(proxy_str: &str) -> ParsedProxy {
     }
 }
 
+fn stealth_options_json(flags: &Flags) -> Option<serde_json::Value> {
+    let opts = &flags.stealth_options;
+    if opts.is_empty() {
+        return None;
+    }
+
+    let mut value = serde_json::Map::new();
+    if let Some(v) = opts.block_webrtc {
+        value.insert("blockWebRTC".to_string(), json!(v));
+    }
+    if let Some(v) = opts.use_system_chrome {
+        value.insert("useSystemChrome".to_string(), json!(v));
+    }
+    if let Some(v) = opts.client_hints {
+        value.insert("clientHints".to_string(), json!(v));
+    }
+    if let Some(ref v) = opts.client_hints_mode {
+        value.insert("clientHintsMode".to_string(), json!(v));
+    }
+    if let Some(v) = opts.input_coordinates {
+        value.insert("inputCoordinates".to_string(), json!(v));
+    }
+    if let Some(ref v) = opts.input_realism {
+        value.insert("inputRealism".to_string(), json!(v));
+    }
+    if let Some(ref v) = opts.typing_realism {
+        value.insert("typingRealism".to_string(), json!(v));
+    }
+    Some(serde_json::Value::Object(value))
+}
+
+fn add_stealth_launch_options(launch_cmd: &mut serde_json::Value, flags: &Flags) {
+    if flags.stealth || flags.cli_stealth {
+        launch_cmd["stealth"] = json!(flags.stealth);
+    }
+    if let Some(ref profile) = flags.stealth_profile {
+        launch_cmd["stealthProfile"] = json!(profile);
+    }
+    if let Some(options) = stealth_options_json(flags) {
+        launch_cmd["stealthOptions"] = options;
+    }
+}
+
 fn run_profiles(json_mode: bool) {
     use crate::native::cdp::chrome::{find_chrome_user_data_dir, list_chrome_profiles};
 
@@ -737,6 +780,7 @@ fn main() {
         user_agent: flags.user_agent.as_deref(),
         stealth: flags.stealth,
         stealth_profile: flags.stealth_profile.as_deref(),
+        stealth_options: &flags.stealth_options,
         proxy: proxy_server.as_deref(),
         proxy_bypass: flags.proxy_bypass.as_deref(),
         proxy_username: proxy_username.as_deref(),
@@ -919,13 +963,7 @@ fn main() {
             launch_cmd["userAgent"] = json!(ua);
         }
 
-        if flags.stealth || flags.cli_stealth {
-            launch_cmd["stealth"] = json!(flags.stealth);
-        }
-
-        if let Some(ref profile) = flags.stealth_profile {
-            launch_cmd["stealthProfile"] = json!(profile);
-        }
+        add_stealth_launch_options(&mut launch_cmd, &flags);
 
         let err = match send_command(launch_cmd, &flags.session) {
             Ok(resp) if resp.success => None,
@@ -1027,13 +1065,7 @@ fn main() {
                 launch_cmd["userAgent"] = json!(ua);
             }
 
-            if flags.stealth || flags.cli_stealth {
-                launch_cmd["stealth"] = json!(flags.stealth);
-            }
-
-            if let Some(ref profile) = flags.stealth_profile {
-                launch_cmd["stealthProfile"] = json!(profile);
-            }
+            add_stealth_launch_options(&mut launch_cmd, &flags);
 
             let err = match send_command(launch_cmd, &flags.session) {
                 Ok(resp) if resp.success => None,
@@ -1073,13 +1105,7 @@ fn main() {
                 launch_cmd["userAgent"] = json!(ua);
             }
 
-            if flags.stealth || flags.cli_stealth {
-                launch_cmd["stealth"] = json!(flags.stealth);
-            }
-
-            if let Some(ref profile) = flags.stealth_profile {
-                launch_cmd["stealthProfile"] = json!(profile);
-            }
+            add_stealth_launch_options(&mut launch_cmd, &flags);
 
             let err = match send_command(launch_cmd, &flags.session) {
                 Ok(resp) if resp.success => None,
@@ -1171,6 +1197,10 @@ fn main() {
 
         if let Some(ref profile) = flags.stealth_profile {
             cmd_obj.insert("stealthProfile".to_string(), json!(profile));
+        }
+
+        if let Some(options) = stealth_options_json(&flags) {
+            cmd_obj.insert("stealthOptions".to_string(), options);
         }
 
         if let Some(ref a) = flags.args {

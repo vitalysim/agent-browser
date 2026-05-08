@@ -3095,6 +3095,8 @@ Options:
                              (or AGENT_BROWSER_STEALTH)
   --stealth-profile <name>   Stealth profile: chrome-windows, chrome-mac, chrome-linux,
                              mobile-android, mobile-ios (or AGENT_BROWSER_STEALTH_PROFILE)
+                             Advanced controls: stealthOptions in config, or
+                             AGENT_BROWSER_STEALTH_CLIENT_HINTS_MODE / INPUT_REALISM / TYPING_REALISM
   --proxy <server>           Proxy server URL (or AGENT_BROWSER_PROXY, HTTP_PROXY, HTTPS_PROXY, ALL_PROXY)
                              Supports authenticated proxies: --proxy "http://user:pass@127.0.0.1:7890"
   --proxy-bypass <hosts>     Bypass proxy for these hosts (or AGENT_BROWSER_PROXY_BYPASS, NO_PROXY)

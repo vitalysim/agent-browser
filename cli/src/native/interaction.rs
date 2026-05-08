@@ -1,10 +1,124 @@
 use std::collections::HashMap;
+use std::env;
+use std::sync::atomic::{AtomicU8, Ordering};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use serde_json::Value;
 
 use super::cdp::client::CdpClient;
 use super::cdp::types::*;
 use super::element::{resolve_element_center, resolve_element_object_id, RefMap};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputRealismMode {
+    Off,
+    Balanced,
+    Aggressive,
+}
+
+const INPUT_REALISM_ENV: u8 = u8::MAX;
+static INPUT_REALISM_OVERRIDE: AtomicU8 = AtomicU8::new(INPUT_REALISM_ENV);
+
+pub fn set_stealth_input_realism(enabled: bool, mode: &str) {
+    let value = if !enabled {
+        0
+    } else {
+        match mode {
+            "off" => 0,
+            "aggressive" => 2,
+            _ => 1,
+        }
+    };
+    INPUT_REALISM_OVERRIDE.store(value, Ordering::Relaxed);
+}
+
+fn input_realism_from_value(value: u8) -> InputRealismMode {
+    match value {
+        0 => InputRealismMode::Off,
+        2 => InputRealismMode::Aggressive,
+        _ => InputRealismMode::Balanced,
+    }
+}
+
+fn stealth_input_realism_mode() -> InputRealismMode {
+    let override_value = INPUT_REALISM_OVERRIDE.load(Ordering::Relaxed);
+    if override_value != INPUT_REALISM_ENV {
+        return input_realism_from_value(override_value);
+    }
+
+    if !env_bool("AGENT_BROWSER_STEALTH") {
+        return InputRealismMode::Off;
+    }
+
+    match env::var("AGENT_BROWSER_STEALTH_INPUT_REALISM")
+        .unwrap_or_else(|_| "balanced".to_string())
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "off" | "false" | "0" => InputRealismMode::Off,
+        "aggressive" => InputRealismMode::Aggressive,
+        _ => InputRealismMode::Balanced,
+    }
+}
+
+fn env_bool(name: &str) -> bool {
+    match env::var(name) {
+        Ok(value) => matches!(
+            value.to_ascii_lowercase().as_str(),
+            "1" | "true" | "yes" | "on"
+        ),
+        Err(_) => false,
+    }
+}
+
+fn cdp_timestamp() -> f64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs_f64())
+        .unwrap_or_default()
+}
+
+fn mouse_event_params(
+    event_type: &str,
+    x: f64,
+    y: f64,
+    button: Option<String>,
+    buttons: Option<i32>,
+    click_count: Option<i32>,
+    timed: bool,
+) -> DispatchMouseEventParams {
+    DispatchMouseEventParams {
+        event_type: event_type.to_string(),
+        x,
+        y,
+        button,
+        buttons,
+        click_count,
+        delta_x: None,
+        delta_y: None,
+        modifiers: None,
+        timestamp: timed.then(cdp_timestamp),
+        pointer_type: timed.then(|| "mouse".to_string()),
+    }
+}
+
+fn deterministic_mouse_offset(x: f64, y: f64, mode: InputRealismMode) -> (f64, f64) {
+    let scale = if mode == InputRealismMode::Aggressive {
+        3.0
+    } else {
+        1.5
+    };
+    let seed = (x.round() as i64)
+        .wrapping_mul(31)
+        .wrapping_add((y.round() as i64).wrapping_mul(17));
+    let dx = ((seed.rem_euclid(7) - 3) as f64) * scale;
+    let dy = (((seed / 7).rem_euclid(7) - 3) as f64) * scale;
+    (x + dx, y + dy)
+}
+
+async fn input_pause(ms: u64) {
+    tokio::time::sleep(tokio::time::Duration::from_millis(ms)).await;
+}
 
 pub async fn click(
     client: &CdpClient,
@@ -63,17 +177,15 @@ pub async fn hover(
     client
         .send_command_typed::<_, Value>(
             "Input.dispatchMouseEvent",
-            &DispatchMouseEventParams {
-                event_type: "mouseMoved".to_string(),
+            &mouse_event_params(
+                "mouseMoved",
                 x,
                 y,
-                button: None,
-                buttons: None,
-                click_count: None,
-                delta_x: None,
-                delta_y: None,
-                modifiers: None,
-            },
+                None,
+                None,
+                None,
+                stealth_input_realism_mode() != InputRealismMode::Off,
+            ),
             Some(&effective_session_id),
         )
         .await?;
@@ -892,24 +1004,43 @@ async fn dispatch_click(
     button: &str,
     click_count: i32,
 ) -> Result<(), String> {
-    // Move
-    client
-        .send_command_typed::<_, Value>(
-            "Input.dispatchMouseEvent",
-            &DispatchMouseEventParams {
-                event_type: "mouseMoved".to_string(),
-                x,
-                y,
-                button: None,
-                buttons: None,
-                click_count: None,
-                delta_x: None,
-                delta_y: None,
-                modifiers: None,
-            },
-            Some(session_id),
-        )
-        .await?;
+    let realism = stealth_input_realism_mode();
+    let timed = realism != InputRealismMode::Off;
+
+    if timed {
+        let steps = if realism == InputRealismMode::Aggressive {
+            4
+        } else {
+            2
+        };
+        let (start_x, start_y) = deterministic_mouse_offset(x, y, realism);
+        for step in 1..=steps {
+            let t = step as f64 / steps as f64;
+            let px = start_x + ((x - start_x) * t);
+            let py = start_y + ((y - start_y) * t);
+            client
+                .send_command_typed::<_, Value>(
+                    "Input.dispatchMouseEvent",
+                    &mouse_event_params("mouseMoved", px, py, None, None, None, true),
+                    Some(session_id),
+                )
+                .await?;
+            input_pause(if realism == InputRealismMode::Aggressive {
+                12
+            } else {
+                8
+            })
+            .await;
+        }
+    } else {
+        client
+            .send_command_typed::<_, Value>(
+                "Input.dispatchMouseEvent",
+                &mouse_event_params("mouseMoved", x, y, None, None, None, false),
+                Some(session_id),
+            )
+            .await?;
+    }
 
     let button_value = match button {
         "right" => 2,
@@ -921,36 +1052,42 @@ async fn dispatch_click(
     client
         .send_command_typed::<_, Value>(
             "Input.dispatchMouseEvent",
-            &DispatchMouseEventParams {
-                event_type: "mousePressed".to_string(),
+            &mouse_event_params(
+                "mousePressed",
                 x,
                 y,
-                button: Some(button.to_string()),
-                buttons: Some(button_value),
-                click_count: Some(click_count),
-                delta_x: None,
-                delta_y: None,
-                modifiers: None,
-            },
+                Some(button.to_string()),
+                Some(button_value),
+                Some(click_count),
+                timed,
+            ),
             Some(session_id),
         )
         .await?;
+
+    if timed {
+        let base = if realism == InputRealismMode::Aggressive {
+            34
+        } else {
+            18
+        };
+        let jitter = ((x.round() as u64).wrapping_add(y.round() as u64)) % 18;
+        input_pause(base + jitter).await;
+    }
 
     // Release
     client
         .send_command_typed::<_, Value>(
             "Input.dispatchMouseEvent",
-            &DispatchMouseEventParams {
-                event_type: "mouseReleased".to_string(),
+            &mouse_event_params(
+                "mouseReleased",
                 x,
                 y,
-                button: Some(button.to_string()),
-                buttons: Some(0),
-                click_count: Some(click_count),
-                delta_x: None,
-                delta_y: None,
-                modifiers: None,
-            },
+                Some(button.to_string()),
+                Some(0),
+                Some(click_count),
+                timed,
+            ),
             Some(session_id),
         )
         .await?;

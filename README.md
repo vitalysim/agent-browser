@@ -738,6 +738,8 @@ This is useful for multimodal AI models that can reason about visual layout, unl
 | `--config <path>` | Use a custom config file (or `AGENT_BROWSER_CONFIG` env) |
 | `--debug` | Debug output |
 
+Advanced stealth controls can be set with `stealthOptions` in `agent-browser.json` or with `AGENT_BROWSER_STEALTH_*` environment variables: `CLIENT_HINTS_MODE` (`low-entropy`, `accept-ch`, `full`), `INPUT_REALISM` (`off`, `balanced`, `aggressive`), `TYPING_REALISM`, `BLOCK_WEBRTC`, `USE_SYSTEM_CHROME`, `CLIENT_HINTS`, and `INPUT_COORDINATES`.
+
 ## Observability Dashboard
 
 Monitor agent-browser sessions in real time with a local web dashboard showing a live viewport and command activity feed.
@@ -1478,8 +1480,8 @@ Optional configuration via environment variables:
 
 | Variable                 | Description                                                                      | Default |
 | ------------------------ | -------------------------------------------------------------------------------- | ------- |
-| `KERNEL_HEADLESS`        | Run browser in headless mode (`true`/`false`)                                    | `false` |
-| `KERNEL_STEALTH`         | Enable stealth mode to avoid bot detection (`true`/`false`)                      | `true`  |
+| `KERNEL_HEADLESS`        | Run browser in headless mode (`true`/`false`)                                    | `true`  |
+| `KERNEL_STEALTH`         | Enable provider stealth mode (`true`/`false`)                                    | `false` |
 | `KERNEL_TIMEOUT_SECONDS` | Session timeout in seconds                                                       | `300`   |
 | `KERNEL_PROFILE_NAME`    | Browser profile name for persistent cookies/logins (created if it doesn't exist) | (none)  |
 

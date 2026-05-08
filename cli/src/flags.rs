@@ -70,6 +70,7 @@ pub struct Config {
     pub user_agent: Option<String>,
     pub stealth: Option<bool>,
     pub stealth_profile: Option<String>,
+    pub stealth_options: StealthOptionsConfig,
     pub provider: Option<String>,
     pub device: Option<String>,
     pub ignore_https_errors: Option<bool>,
@@ -93,6 +94,73 @@ pub struct Config {
     pub idle_timeout: Option<String>,
     pub no_auto_dialog: Option<bool>,
     pub model: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, PartialEq, Eq)]
+#[serde(default, rename_all = "camelCase")]
+pub struct StealthOptionsConfig {
+    #[serde(rename = "blockWebRTC")]
+    pub block_webrtc: Option<bool>,
+    pub use_system_chrome: Option<bool>,
+    pub client_hints: Option<bool>,
+    pub client_hints_mode: Option<String>,
+    pub input_coordinates: Option<bool>,
+    pub input_realism: Option<String>,
+    pub typing_realism: Option<String>,
+}
+
+impl StealthOptionsConfig {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            block_webrtc: other.block_webrtc.or(self.block_webrtc),
+            use_system_chrome: other.use_system_chrome.or(self.use_system_chrome),
+            client_hints: other.client_hints.or(self.client_hints),
+            client_hints_mode: other.client_hints_mode.or(self.client_hints_mode),
+            input_coordinates: other.input_coordinates.or(self.input_coordinates),
+            input_realism: other.input_realism.or(self.input_realism),
+            typing_realism: other.typing_realism.or(self.typing_realism),
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.block_webrtc.is_none()
+            && self.use_system_chrome.is_none()
+            && self.client_hints.is_none()
+            && self.client_hints_mode.is_none()
+            && self.input_coordinates.is_none()
+            && self.input_realism.is_none()
+            && self.typing_realism.is_none()
+    }
+
+    fn apply_env_overrides(&mut self) {
+        if let Some(value) = env_bool_value("AGENT_BROWSER_STEALTH_BLOCK_WEBRTC") {
+            self.block_webrtc = Some(value);
+        }
+        if let Some(value) = env_bool_value("AGENT_BROWSER_STEALTH_USE_SYSTEM_CHROME") {
+            self.use_system_chrome = Some(value);
+        }
+        if let Some(value) = env_bool_value("AGENT_BROWSER_STEALTH_CLIENT_HINTS") {
+            self.client_hints = Some(value);
+        }
+        if let Ok(value) = env::var("AGENT_BROWSER_STEALTH_CLIENT_HINTS_MODE") {
+            if !value.is_empty() {
+                self.client_hints_mode = Some(value);
+            }
+        }
+        if let Some(value) = env_bool_value("AGENT_BROWSER_STEALTH_INPUT_COORDINATES") {
+            self.input_coordinates = Some(value);
+        }
+        if let Ok(value) = env::var("AGENT_BROWSER_STEALTH_INPUT_REALISM") {
+            if !value.is_empty() {
+                self.input_realism = Some(value);
+            }
+        }
+        if let Ok(value) = env::var("AGENT_BROWSER_STEALTH_TYPING_REALISM") {
+            if !value.is_empty() {
+                self.typing_realism = Some(value);
+            }
+        }
+    }
 }
 
 impl Config {
@@ -133,6 +201,7 @@ impl Config {
             user_agent: other.user_agent.or(self.user_agent),
             stealth: other.stealth.or(self.stealth),
             stealth_profile: other.stealth_profile.or(self.stealth_profile),
+            stealth_options: self.stealth_options.merge(other.stealth_options),
             provider: other.provider.or(self.provider),
             device: other.device.or(self.device),
             ignore_https_errors: other.ignore_https_errors.or(self.ignore_https_errors),
@@ -189,6 +258,12 @@ fn env_var_is_truthy(name: &str) -> bool {
         Ok(val) => !matches!(val.to_lowercase().as_str(), "0" | "false" | "no" | ""),
         Err(_) => false,
     }
+}
+
+fn env_bool_value(name: &str) -> Option<bool> {
+    env::var(name)
+        .ok()
+        .map(|val| !matches!(val.to_lowercase().as_str(), "0" | "false" | "no" | ""))
 }
 
 /// Parse an optional boolean value after a flag. Returns (value, consumed_next_arg).
@@ -310,6 +385,7 @@ pub struct Flags {
     pub user_agent: Option<String>,
     pub stealth: bool,
     pub stealth_profile: Option<String>,
+    pub stealth_options: StealthOptionsConfig,
     pub provider: Option<String>,
     pub ignore_https_errors: bool,
     pub allow_file_access: bool,
@@ -410,6 +486,9 @@ pub fn parse_flags(args: &[String]) -> Flags {
         config.enable.unwrap_or_default()
     };
 
+    let mut stealth_options = config.stealth_options;
+    stealth_options.apply_env_overrides();
+
     let mut flags = Flags {
         json: env_var_is_truthy("AGENT_BROWSER_JSON") || config.json.unwrap_or(false),
         headed: env_var_is_truthy("AGENT_BROWSER_HEADED") || config.headed.unwrap_or(false),
@@ -450,6 +529,7 @@ pub fn parse_flags(args: &[String]) -> Flags {
         stealth_profile: env::var("AGENT_BROWSER_STEALTH_PROFILE")
             .ok()
             .or(config.stealth_profile),
+        stealth_options,
         provider: env::var("AGENT_BROWSER_PROVIDER").ok().or(config.provider),
         ignore_https_errors: env_var_is_truthy("AGENT_BROWSER_IGNORE_HTTPS_ERRORS")
             || config.ignore_https_errors.unwrap_or(false),
@@ -1224,6 +1304,11 @@ mod tests {
             "userAgent": "test-agent",
             "stealth": true,
             "stealthProfile": "chrome-windows",
+            "stealthOptions": {
+                "blockWebRTC": false,
+                "clientHintsMode": "accept-ch",
+                "inputRealism": "balanced"
+            },
             "provider": "ios",
             "device": "iPhone 15",
             "ignoreHttpsErrors": true,
@@ -1251,6 +1336,15 @@ mod tests {
         assert_eq!(config.user_agent.as_deref(), Some("test-agent"));
         assert_eq!(config.stealth, Some(true));
         assert_eq!(config.stealth_profile.as_deref(), Some("chrome-windows"));
+        assert_eq!(config.stealth_options.block_webrtc, Some(false));
+        assert_eq!(
+            config.stealth_options.client_hints_mode.as_deref(),
+            Some("accept-ch")
+        );
+        assert_eq!(
+            config.stealth_options.input_realism.as_deref(),
+            Some("balanced")
+        );
         assert_eq!(config.provider.as_deref(), Some("ios"));
         assert_eq!(config.device.as_deref(), Some("iPhone 15"));
         assert_eq!(config.ignore_https_errors, Some(true));
@@ -1292,11 +1386,20 @@ mod tests {
             headed: Some(true),
             proxy: Some("http://user-proxy:8080".to_string()),
             profile: Some("/user/profile".to_string()),
+            stealth_options: StealthOptionsConfig {
+                block_webrtc: Some(true),
+                input_realism: Some("balanced".to_string()),
+                ..StealthOptionsConfig::default()
+            },
             ..Config::default()
         };
         let project = Config {
             proxy: Some("http://project-proxy:9090".to_string()),
             debug: Some(true),
+            stealth_options: StealthOptionsConfig {
+                input_realism: Some("aggressive".to_string()),
+                ..StealthOptionsConfig::default()
+            },
             ..Config::default()
         };
         let merged = user.merge(project);
@@ -1304,6 +1407,11 @@ mod tests {
         assert_eq!(merged.proxy.as_deref(), Some("http://project-proxy:9090")); // overridden by project
         assert_eq!(merged.profile.as_deref(), Some("/user/profile")); // kept from user
         assert_eq!(merged.debug, Some(true)); // added by project
+        assert_eq!(merged.stealth_options.block_webrtc, Some(true));
+        assert_eq!(
+            merged.stealth_options.input_realism.as_deref(),
+            Some("aggressive")
+        );
     }
 
     #[test]

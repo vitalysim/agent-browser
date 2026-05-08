@@ -469,6 +469,10 @@ pub struct DispatchMouseEventParams {
     pub delta_y: Option<f64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub modifiers: Option<i32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub timestamp: Option<f64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub pointer_type: Option<String>,
 }
 
 #[derive(Debug, Serialize)]

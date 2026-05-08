@@ -44,6 +44,7 @@ pub(super) fn check(checks: &mut Vec<Check>) {
             .unwrap_or(0)
     );
 
+    let stealth_options = crate::flags::StealthOptionsConfig::default();
     // Armed after `ensure_daemon` succeeds so we don't send a stray `close`
     // or delete sidecar files for a daemon that never started. On every early
     // return past the `Some(...)` assignment below, Drop runs one close and
@@ -61,6 +62,7 @@ pub(super) fn check(checks: &mut Vec<Check>) {
         user_agent: None,
         stealth: false,
         stealth_profile: None,
+        stealth_options: &stealth_options,
         proxy: None,
         proxy_bypass: None,
         proxy_username: None,

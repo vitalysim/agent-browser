@@ -305,6 +305,7 @@ pub struct BrowserManager {
     /// Origins visited during this session, used by save_state to collect cross-origin localStorage.
     visited_origins: HashSet<String>,
     next_tab_id: u32,
+    pause_new_targets: bool,
 }
 
 const LIGHTPANDA_CDP_CONNECT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -341,6 +342,7 @@ impl BrowserManager {
         let user_agent = options.user_agent.clone();
         let color_scheme = options.color_scheme.clone();
         let download_path = options.download_path.clone();
+        let pause_new_targets = options.stealth.is_some();
 
         let (ws_url, process) = match engine {
             "lightpanda" => {
@@ -377,6 +379,7 @@ impl BrowserManager {
                 ignore_https_errors,
                 visited_origins: HashSet::new(),
                 next_tab_id: 1,
+                pause_new_targets,
             };
             manager.discover_and_attach_targets().await?;
             manager
@@ -466,6 +469,7 @@ impl BrowserManager {
             ignore_https_errors: false,
             visited_origins: HashSet::new(),
             next_tab_id: 1,
+            pause_new_targets: false,
         };
 
         if direct_page {
@@ -578,11 +582,16 @@ impl BrowserManager {
             }
 
             self.active_page_index = 0;
-            let session_id = self.pages[0].session_id.clone();
-            self.enable_domains(&session_id).await?;
+            for session_id in self.pages.iter().map(|page| page.session_id.clone()) {
+                self.enable_domains(&session_id).await?;
+            }
         }
 
         Ok(())
+    }
+
+    pub fn set_pause_new_targets(&mut self, pause: bool) {
+        self.pause_new_targets = pause;
     }
 
     pub async fn enable_domains_pub(&self, session_id: &str) -> Result<(), String> {
@@ -615,7 +624,7 @@ impl BrowserManager {
                 "Target.setAutoAttach",
                 Some(json!({
                     "autoAttach": true,
-                    "waitForDebuggerOnStart": false,
+                    "waitForDebuggerOnStart": self.pause_new_targets,
                     "flatten": true
                 })),
                 Some(session_id),
@@ -1617,6 +1626,7 @@ async fn initialize_lightpanda_manager(
             ignore_https_errors: false,
             visited_origins: HashSet::new(),
             next_tab_id: 1,
+            pause_new_targets: false,
         };
 
         match discover_and_attach_lightpanda_targets(&mut manager, deadline).await {

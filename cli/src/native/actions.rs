@@ -617,29 +617,20 @@ impl DaemonState {
         for (frame_id, iframe_sid) in &drained.attached_iframe_sessions {
             self.iframe_sessions
                 .insert(frame_id.clone(), iframe_sid.clone());
-            if let Some(ref mgr) = self.browser {
-                let _ = mgr
-                    .client
-                    .send_command_no_params(
-                        "Runtime.runIfWaitingForDebugger",
-                        Some(iframe_sid.as_str()),
-                    )
-                    .await;
-                let _ = mgr
-                    .client
+            if let Some(client) = self.browser.as_ref().map(|mgr| mgr.client.clone()) {
+                let _ = client
                     .send_command_no_params("DOM.enable", Some(iframe_sid.as_str()))
                     .await;
-                let _ = mgr
-                    .client
+                let _ = client
                     .send_command_no_params("Accessibility.enable", Some(iframe_sid.as_str()))
                     .await;
                 if self.har_recording || self.request_tracking {
-                    let _ = mgr
-                        .client
+                    let _ = client
                         .send_command_no_params("Network.enable", Some(iframe_sid.as_str()))
                         .await;
                 }
             }
+            apply_init_scripts_to_session(self, iframe_sid, true, true).await;
         }
         for sid in &drained.detached_iframe_sessions {
             self.iframe_sessions.retain(|_, v| v != sid);
@@ -647,6 +638,7 @@ impl DaemonState {
 
         // Attach and register new targets
         for te in &drained.new_targets {
+            let mut attached_session_id = None;
             if let Some(ref mut mgr) = self.browser {
                 let attach_result: Result<AttachToTargetResult, String> = mgr
                     .client
@@ -660,7 +652,8 @@ impl DaemonState {
                     )
                     .await;
                 if let Ok(attach) = attach_result {
-                    let _ = mgr.enable_domains_pub(&attach.session_id).await;
+                    let session_id = attach.session_id.clone();
+                    let _ = mgr.enable_domains_pub(&session_id).await;
 
                     // Install domain filter on new pages
                     let df = self.domain_filter.read().await;
@@ -668,7 +661,7 @@ impl DaemonState {
                         let has_proxy_creds = self.proxy_credentials.read().await.is_some();
                         let _ = network::install_domain_filter(
                             &mgr.client,
-                            &attach.session_id,
+                            &session_id,
                             &filter.allowed_domains,
                             has_proxy_creds,
                         )
@@ -680,12 +673,16 @@ impl DaemonState {
                         tab_id,
                         label: None,
                         target_id: te.target_info.target_id.clone(),
-                        session_id: attach.session_id,
+                        session_id: session_id.clone(),
                         url: te.target_info.url.clone(),
                         title: te.target_info.title.clone(),
                         target_type: te.target_info.target_type.clone(),
                     });
+                    attached_session_id = Some(session_id);
                 }
+            }
+            if let Some(session_id) = attached_session_id {
+                apply_init_scripts_to_session(self, &session_id, true, true).await;
             }
         }
 
@@ -1563,7 +1560,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         state.start_fetch_handler();
         state.start_dialog_handler();
         state.update_stream_client().await;
-        apply_launch_init_scripts(state).await;
+        prepare_launch_init_scripts(state).await;
         try_auto_restore_state(state).await;
         try_load_storage_state(state, &storage_state_path).await;
         return Ok(());
@@ -1576,7 +1573,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         state.start_fetch_handler();
         state.start_dialog_handler();
         state.update_stream_client().await;
-        apply_launch_init_scripts(state).await;
+        prepare_launch_init_scripts(state).await;
         try_auto_restore_state(state).await;
         try_load_storage_state(state, &storage_state_path).await;
         return Ok(());
@@ -1612,7 +1609,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
                     state.start_dialog_handler();
                     state.update_stream_client().await;
                     write_provider_file(&state.session_id, &p);
-                    apply_launch_init_scripts(state).await;
+                    prepare_launch_init_scripts(state).await;
                     try_auto_restore_state(state).await;
                     try_load_storage_state(state, &storage_state_path).await;
                     return Ok(());
@@ -1646,7 +1643,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         }
     }
 
-    apply_launch_init_scripts(state).await;
+    prepare_launch_init_scripts(state).await;
     try_auto_restore_state(state).await;
     try_load_storage_state(state, &storage_state_path).await;
     Ok(())
@@ -1657,49 +1654,166 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
 /// scripts are registered before any page JS runs on the next navigation.
 /// Also evaluates each script on the current page (if any) so the effect is
 /// immediate for already-loaded pages.
+async fn prepare_launch_init_scripts(state: &mut DaemonState) {
+    refresh_stealth_browser_version(state).await;
+    configure_stealth_interaction(state);
+    if let Some(ref mut mgr) = state.browser {
+        mgr.set_pause_new_targets(state.stealth.is_some());
+        for page in mgr.pages_list() {
+            let _ = mgr.enable_domains_pub(&page.session_id).await;
+        }
+    }
+    apply_launch_init_scripts(state).await;
+}
+
+fn configure_stealth_interaction(state: &DaemonState) {
+    let Some(config) = state.stealth.as_ref() else {
+        interaction::set_stealth_input_realism(false, "off");
+        return;
+    };
+    let mode = match config.input_realism {
+        stealth::InputRealismMode::Off => "off",
+        stealth::InputRealismMode::Balanced => "balanced",
+        stealth::InputRealismMode::Aggressive => "aggressive",
+    };
+    interaction::set_stealth_input_realism(true, mode);
+}
+
+async fn refresh_stealth_browser_version(state: &mut DaemonState) {
+    if state.stealth.is_none() {
+        return;
+    }
+
+    let version = match state.browser.as_ref() {
+        Some(mgr) => mgr
+            .client
+            .send_command_no_params("Browser.getVersion", None)
+            .await
+            .ok(),
+        None => None,
+    };
+
+    let Some(version) = version else {
+        return;
+    };
+
+    let product = version
+        .get("product")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let browser_ua = version
+        .get("userAgent")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+
+    let generated_ua = state
+        .stealth
+        .as_ref()
+        .map(stealth::user_agent)
+        .unwrap_or_default();
+    let should_update_ua = state.launch_user_agent.is_none()
+        || state.launch_user_agent.as_deref() == Some(&generated_ua);
+
+    if let Some(ref mut stealth_config) = state.stealth {
+        stealth_config.apply_browser_version(product.as_deref(), browser_ua.as_deref());
+        if should_update_ua {
+            state.launch_user_agent = Some(stealth::user_agent(stealth_config));
+        }
+    }
+}
+
 async fn apply_launch_init_scripts(state: &DaemonState) {
     let Some(mgr) = state.browser.as_ref() else {
         return;
     };
 
-    if let Ok(session_id) = mgr.active_session_id() {
-        if let Some(ref ua) = state.launch_user_agent {
-            let mut params = json!({ "userAgent": ua });
-            if let Some(ref stealth_config) = state.stealth {
-                if *ua == stealth::user_agent(stealth_config) {
-                    params["acceptLanguage"] = json!(stealth::accept_language(stealth_config));
-                    params["platform"] = json!(stealth::user_agent_platform(stealth_config));
-                    if let Some(metadata) = stealth::user_agent_metadata(stealth_config) {
-                        params["userAgentMetadata"] = metadata;
-                    }
+    let mut sessions = HashSet::new();
+    for page in mgr.pages_list() {
+        if sessions.insert(page.session_id.clone()) {
+            apply_init_scripts_to_session(state, &page.session_id, true, true).await;
+        }
+    }
+    for iframe_session in state.iframe_sessions.values() {
+        if sessions.insert(iframe_session.clone()) {
+            apply_init_scripts_to_session(state, iframe_session, true, true).await;
+        }
+    }
+}
+
+async fn apply_init_scripts_to_session(
+    state: &DaemonState,
+    session_id: &str,
+    evaluate_stealth_now: bool,
+    resume_after: bool,
+) {
+    let Some(mgr) = state.browser.as_ref() else {
+        return;
+    };
+    let target_session = (!session_id.is_empty()).then_some(session_id);
+
+    if let Some(ref ua) = state.launch_user_agent {
+        let mut params = json!({ "userAgent": ua });
+        if let Some(ref stealth_config) = state.stealth {
+            if *ua == stealth::user_agent(stealth_config) {
+                params["acceptLanguage"] = json!(stealth::accept_language(stealth_config));
+                params["platform"] = json!(stealth::user_agent_platform(stealth_config));
+                if let Some(metadata) = stealth::user_agent_metadata(stealth_config) {
+                    params["userAgentMetadata"] = metadata;
                 }
             }
+        }
+        let _ = mgr
+            .client
+            .send_command(
+                "Emulation.setUserAgentOverride",
+                Some(params),
+                target_session,
+            )
+            .await;
+    }
+
+    if let Some(ref stealth_config) = state.stealth {
+        let headers = stealth::client_hint_headers(stealth_config);
+        if !headers.is_empty() {
+            let headers_value: Value = headers
+                .into_iter()
+                .map(|(key, value)| (key, Value::String(value)))
+                .collect::<serde_json::Map<String, Value>>()
+                .into();
             let _ = mgr
                 .client
                 .send_command(
-                    "Emulation.setUserAgentOverride",
-                    Some(params),
-                    Some(session_id),
+                    "Network.setExtraHTTPHeaders",
+                    Some(json!({ "headers": headers_value })),
+                    target_session,
                 )
                 .await;
         }
 
-        if let Some(ref stealth_config) = state.stealth {
-            let headers = stealth::client_hint_headers(stealth_config);
-            if !headers.is_empty() {
-                let _ = network::set_extra_headers(&mgr.client, session_id, &headers).await;
-                for iframe_session in state.iframe_sessions.values() {
-                    let _ = network::set_extra_headers(&mgr.client, iframe_session, &headers).await;
-                }
-            }
-        }
-    }
-
-    if let Some(ref stealth_config) = state.stealth {
         let source = stealth::init_script(stealth_config);
         if !source.is_empty() {
-            let _ = mgr.add_script_to_evaluate(&source).await;
-            let _ = mgr.evaluate(&source, None).await;
+            let _ = mgr
+                .client
+                .send_command(
+                    "Page.addScriptToEvaluateOnNewDocument",
+                    Some(json!({ "source": source })),
+                    target_session,
+                )
+                .await;
+            if evaluate_stealth_now {
+                let _ = mgr
+                    .client
+                    .send_command(
+                        "Runtime.evaluate",
+                        Some(json!({
+                            "expression": source,
+                            "returnByValue": false,
+                            "awaitPromise": false
+                        })),
+                        target_session,
+                    )
+                    .await;
+            }
         }
     }
 
@@ -1712,7 +1826,14 @@ async fn apply_launch_init_scripts(state: &DaemonState) {
         {
             match feature {
                 "react-devtools" | "react" => {
-                    let _ = mgr.add_script_to_evaluate(react::INSTALL_HOOK_JS).await;
+                    let _ = mgr
+                        .client
+                        .send_command(
+                            "Page.addScriptToEvaluateOnNewDocument",
+                            Some(json!({ "source": react::INSTALL_HOOK_JS })),
+                            target_session,
+                        )
+                        .await;
                 }
                 other => {
                     eprintln!("warning: unknown --enable feature '{}'", other);
@@ -1730,13 +1851,27 @@ async fn apply_launch_init_scripts(state: &DaemonState) {
         {
             match fs::read_to_string(path) {
                 Ok(source) => {
-                    let _ = mgr.add_script_to_evaluate(&source).await;
+                    let _ = mgr
+                        .client
+                        .send_command(
+                            "Page.addScriptToEvaluateOnNewDocument",
+                            Some(json!({ "source": source })),
+                            target_session,
+                        )
+                        .await;
                 }
                 Err(e) => {
                     eprintln!("warning: failed to read --init-script '{}': {}", path, e);
                 }
             }
         }
+    }
+
+    if resume_after {
+        let _ = mgr
+            .client
+            .send_command_no_params("Runtime.runIfWaitingForDebugger", target_session)
+            .await;
     }
 }
 
@@ -1995,6 +2130,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         }
     } else {
         load_storage_state(state, &storage_state_owned).await?;
+        prepare_launch_init_scripts(state).await;
         return Ok(json!({ "launched": true, "reused": true }));
     }
     state.ref_map.clear();
@@ -2017,7 +2153,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         state.start_dialog_handler();
         state.update_stream_client().await;
         load_storage_state_or_rollback(state, &storage_state_owned).await?;
-        apply_launch_init_scripts(state).await;
+        prepare_launch_init_scripts(state).await;
         return Ok(json!({ "launched": true }));
     }
 
@@ -2029,7 +2165,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         state.start_dialog_handler();
         state.update_stream_client().await;
         load_storage_state_or_rollback(state, &storage_state_owned).await?;
-        apply_launch_init_scripts(state).await;
+        prepare_launch_init_scripts(state).await;
         return Ok(json!({ "launched": true }));
     }
 
@@ -2041,7 +2177,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         state.start_dialog_handler();
         state.update_stream_client().await;
         load_storage_state_or_rollback(state, &storage_state_owned).await?;
-        apply_launch_init_scripts(state).await;
+        prepare_launch_init_scripts(state).await;
         return Ok(json!({ "launched": true }));
     }
 
@@ -2079,7 +2215,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
                         state.update_stream_client().await;
                         write_provider_file(&state.session_id, provider);
                         load_storage_state_or_rollback(state, &storage_state_owned).await?;
-                        apply_launch_init_scripts(state).await;
+                        prepare_launch_init_scripts(state).await;
 
                         if let Some(info) = providers::get_agentcore_info() {
                             return Ok(json!({
@@ -2177,7 +2313,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
     // normal browser traffic.
     load_storage_state_or_rollback(state, &storage_state_owned).await?;
 
-    apply_launch_init_scripts(state).await;
+    prepare_launch_init_scripts(state).await;
 
     Ok(json!({ "launched": true }))
 }
@@ -2732,9 +2868,12 @@ async fn handle_click(cmd: &Value, state: &mut DaemonState) -> Result<Value, Str
             })?
             .to_string();
 
-        let mgr = state.browser.as_mut().ok_or("Browser not launched")?;
         state.ref_map.clear();
-        mgr.tab_new(Some(&href), None).await?;
+        {
+            let mgr = state.browser.as_mut().ok_or("Browser not launched")?;
+            mgr.tab_new(Some(&href), None).await?;
+        }
+        apply_launch_init_scripts(state).await;
 
         return Ok(json!({ "clicked": selector, "newTab": true, "url": href }));
     }
@@ -3781,13 +3920,17 @@ async fn handle_tab_list(state: &DaemonState) -> Result<Value, String> {
 }
 
 async fn handle_tab_new(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
-    let mgr = state.browser.as_mut().ok_or("Browser not launched")?;
     let url = cmd.get("url").and_then(|v| v.as_str());
     let label = cmd.get("label").and_then(|v| v.as_str());
     state.ref_map.clear();
     state.iframe_sessions.clear();
     state.active_frame_id = None;
-    mgr.tab_new(url, label).await
+    let result = {
+        let mgr = state.browser.as_mut().ok_or("Browser not launched")?;
+        mgr.tab_new(url, label).await?
+    };
+    apply_launch_init_scripts(state).await;
+    Ok(result)
 }
 
 async fn handle_tab_switch(cmd: &Value, state: &mut DaemonState) -> Result<Value, String> {
@@ -4110,7 +4253,7 @@ async fn handle_recording_start(cmd: &Value, state: &mut DaemonState) -> Result<
 
     let viewport = state.viewport;
 
-    let (client, new_session_id) = {
+    let (client, new_session_id, nav_url) = {
         let mgr = state.browser.as_mut().ok_or("Browser not launched")?;
         let old_session_id = mgr.active_session_id()?.to_string();
 
@@ -4230,21 +4373,22 @@ async fn handle_recording_start(cmd: &Value, state: &mut DaemonState) -> Result<
             let _ = mgr.set_viewport(w, h, scale, mobile).await;
         }
 
-        // Navigate to URL
-        if nav_url != "about:blank" {
-            let _ = mgr
-                .client
-                .send_command(
-                    "Page.navigate",
-                    Some(json!({ "url": nav_url })),
-                    Some(&new_session_id),
-                )
-                .await;
-            tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
-        }
-
-        (mgr.client.clone(), new_session_id)
+        (mgr.client.clone(), new_session_id, nav_url)
     };
+
+    apply_init_scripts_to_session(state, &new_session_id, true, true).await;
+
+    // Navigate only after init scripts are registered for the isolated context.
+    if nav_url != "about:blank" {
+        let _ = client
+            .send_command(
+                "Page.navigate",
+                Some(json!({ "url": nav_url })),
+                Some(&new_session_id),
+            )
+            .await;
+        tokio::time::sleep(tokio::time::Duration::from_millis(1000)).await;
+    }
 
     let result = recording::recording_start(&mut state.recording_state, path)?;
     state.start_recording_task(client, new_session_id).await?;
@@ -7951,6 +8095,8 @@ fn build_mouse_event_params(
         delta_x,
         delta_y,
         modifiers,
+        timestamp: None,
+        pointer_type: None,
     }
 }
 

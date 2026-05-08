@@ -61,12 +61,57 @@
     },
     "stealth": {
       "type": "boolean",
-      "description": "Enable stealth mode with anti-detection launch flags and page-runtime patches."
+      "description": "Enable stealth launch flags and page-runtime fingerprint patches."
     },
     "stealthProfile": {
       "type": "string",
       "enum": ["chrome-windows", "chrome-mac", "chrome-linux", "mobile-android", "mobile-ios"],
       "description": "Fingerprint profile used when stealth mode is enabled."
+    },
+    "stealthOptions": {
+      "type": "object",
+      "description": "Advanced stealth-mode controls for authorized research environments.",
+      "additionalProperties": false,
+      "properties": {
+        "blockWebRTC": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply WebRTC launch/runtime restrictions."
+        },
+        "useSystemChrome": {
+          "type": "boolean",
+          "default": false,
+          "description": "Prefer an installed system Chrome/Chromium binary when available."
+        },
+        "clientHints": {
+          "type": "boolean",
+          "default": true,
+          "description": "Apply User-Agent Client Hints metadata and compatible headers."
+        },
+        "clientHintsMode": {
+          "type": "string",
+          "enum": ["low-entropy", "accept-ch", "full"],
+          "default": "accept-ch",
+          "description": "Controls whether high-entropy Client Hint headers are sent globally."
+        },
+        "inputCoordinates": {
+          "type": "boolean",
+          "default": true,
+          "description": "Patch page-observed click coordinates to avoid zero-coordinate automation artifacts."
+        },
+        "inputRealism": {
+          "type": "string",
+          "enum": ["off", "balanced", "aggressive"],
+          "default": "balanced",
+          "description": "Controls CDP mouse timestamping and small movement interpolation."
+        },
+        "typingRealism": {
+          "type": "string",
+          "enum": ["off", "balanced"],
+          "default": "off",
+          "description": "Reserved typing cadence mode; currently defaults off for deterministic automation."
+        }
+      }
     },
     "provider": {
       "type": "string",
