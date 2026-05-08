@@ -240,6 +240,8 @@ fn main() {
             flags.proxy.as_ref().map(|_| "--proxy"),
             flags.proxy_bypass.as_ref().map(|_| "--proxy-bypass"),
             flags.ignore_https_errors.then(|| "--ignore-https-errors"),
+            flags.stealth.then(|| "--stealth"),
+            flags.stealth_profile.as_ref().map(|_| "--stealth-profile"),
         ]
         .into_iter()
         .flatten()
@@ -394,7 +396,8 @@ fn main() {
         || flags.state.is_some()
         || flags.proxy.is_some()
         || flags.args.is_some()
-        || flags.user_agent.is_some())
+        || flags.user_agent.is_some()
+        || flags.stealth)
         && flags.cdp.is_none()
         && flags.provider.is_none()
     {
@@ -444,7 +447,15 @@ fn main() {
         }
 
         if flags.ignore_https_errors {
-            launch_cmd["ignoreHTTPSErrors"] = json!(true);
+            cmd_obj.insert("ignoreHTTPSErrors".to_string(), json!(true));
+        }
+
+        if flags.stealth {
+            cmd_obj.insert("stealth".to_string(), json!(true));
+        }
+
+        if let Some(ref stealth_profile) = flags.stealth_profile {
+            cmd_obj.insert("stealthProfile".to_string(), json!(stealth_profile));
         }
 
         match send_command(launch_cmd, &flags.session) {

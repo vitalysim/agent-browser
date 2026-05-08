@@ -326,4 +326,21 @@ mod tests {
         assert_eq!(flags.session, "test");
         assert_eq!(flags.executable_path, Some("/custom/chrome".to_string()));
     }
+
+    #[test]
+    fn test_parse_stealth_flags() {
+        let flags = parse_flags(&args(
+            "--stealth --stealth-profile chrome-windows open example.com",
+        ));
+        assert!(flags.stealth);
+        assert_eq!(flags.stealth_profile, Some("chrome-windows".to_string()));
+    }
+
+    #[test]
+    fn test_clean_args_removes_stealth_flags() {
+        let cleaned = clean_args(&args(
+            "--stealth --stealth-profile chrome-windows open example.com",
+        ));
+        assert_eq!(cleaned, vec!["open", "example.com"]);
+    }
 }
