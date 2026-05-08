@@ -738,7 +738,46 @@ This is useful for multimodal AI models that can reason about visual layout, unl
 | `--config <path>` | Use a custom config file (or `AGENT_BROWSER_CONFIG` env) |
 | `--debug` | Debug output |
 
-Advanced stealth controls can be set with `stealthOptions` in `agent-browser.json` or with `AGENT_BROWSER_STEALTH_*` environment variables: `CLIENT_HINTS_MODE` (`low-entropy`, `accept-ch`, `full`), `INPUT_REALISM` (`off`, `balanced`, `aggressive`), `TYPING_REALISM`, `BLOCK_WEBRTC`, `USE_SYSTEM_CHROME`, `CLIENT_HINTS`, and `INPUT_COORDINATES`.
+## Stealth Mode For Authorized Research
+
+`--stealth` enables a browser fingerprint consistency layer for authorized vulnerability research, application testing, and lab environments. It is not an anonymity system, it does not solve CAPTCHAs, and it does not make network-level signals such as IP reputation, TLS fingerprinting, or proxy quality disappear.
+
+```bash
+agent-browser --stealth open https://target.example
+agent-browser --stealth --stealth-profile chrome-mac open https://target.example
+```
+
+Current fork capabilities:
+
+| Capability | What it does |
+|------------|--------------|
+| Launch hardening | Adds Chrome launch flags that reduce common automation-specific browser surfaces. |
+| Runtime fingerprint patches | Registers page init scripts for navigator, screen, WebGL/canvas/audio, plugins, permissions, visibility, Chrome runtime shape, WebRTC behavior, and input coordinate artifacts. |
+| Full session coverage | Applies stealth setup to the active page, existing attached pages, new tabs, popups, CDP target attachments, cross-origin iframe sessions, and isolated recording contexts. |
+| Version alignment | Reads `Browser.getVersion` and rewrites the generated Chrome User-Agent and User-Agent Client Hints metadata to match the running browser version. |
+| Client Hint modes | Defaults to `accept-ch`, sending low-entropy HTTP Client Hints while keeping full JS/CDP metadata available. `full` is available for controlled lab tests. |
+| Input realism | Adds CDP mouse timestamps, pointer type, and small movement interpolation when stealth input realism is enabled. |
+| Provider integration | Global `--stealth` / `AGENT_BROWSER_STEALTH` flows through supported local, CDP, and provider launch paths where the backend exposes compatible controls. |
+
+Advanced controls are configured in `agent-browser.json` with `stealthOptions`, or by `AGENT_BROWSER_STEALTH_*` environment variables:
+
+```json
+{
+  "stealth": true,
+  "stealthProfile": "chrome-mac",
+  "stealthOptions": {
+    "clientHintsMode": "accept-ch",
+    "inputRealism": "balanced",
+    "typingRealism": "off",
+    "blockWebRTC": true,
+    "useSystemChrome": false,
+    "clientHints": true,
+    "inputCoordinates": true
+  }
+}
+```
+
+`clientHintsMode` accepts `low-entropy`, `accept-ch`, or `full`. `inputRealism` accepts `off`, `balanced`, or `aggressive`. `typingRealism` is reserved and currently defaults to `off` to keep typing deterministic.
 
 ## Observability Dashboard
 

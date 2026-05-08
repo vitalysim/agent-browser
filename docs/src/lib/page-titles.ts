@@ -15,6 +15,7 @@ export const PAGE_TITLES: Record<string, string> = {
   profiler: "Profiler",
   ios: "iOS Simulator",
   security: "Security",
+  stealth: "Stealth Mode",
   "engines/chrome": "Chrome",
   "engines/lightpanda": "Lightpanda",
   next: "Next.js + Vercel",

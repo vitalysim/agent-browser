@@ -1,0 +1,106 @@
+# Stealth Mode
+
+Stealth mode is a browser fingerprint consistency layer for authorized vulnerability research, application testing, and lab environments. It reduces common automation-specific browser artifacts, but it is not an anonymity system and does not bypass network-level controls such as IP reputation, TLS fingerprinting, proxy quality, account history, or CAPTCHA workflows.
+
+```bash
+agent-browser --stealth open https://target.example
+agent-browser --stealth --stealth-profile chrome-mac open https://target.example
+```
+
+## What It Covers
+
+<table>
+  <thead>
+    <tr><th>Area</th><th>Behavior</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Launch flags</td><td>Applies Chromium flags that reduce common automation-specific browser surfaces.</td></tr>
+    <tr><td>Runtime fingerprint</td><td>Registers page init scripts for navigator, screen, WebGL/canvas/audio, plugins, permissions, visibility, Chrome runtime shape, WebRTC behavior, and input coordinate artifacts.</td></tr>
+    <tr><td>Session coverage</td><td>Applies stealth setup to existing pages, new tabs, popups, attached CDP targets, cross-origin iframe sessions, and isolated recording contexts.</td></tr>
+    <tr><td>Browser version</td><td>Reads <code>Browser.getVersion</code> and rewrites generated Chrome User-Agent and User-Agent Client Hints metadata to match the running browser version.</td></tr>
+    <tr><td>Client Hints</td><td>Defaults to <code>accept-ch</code>, which sends low-entropy HTTP Client Hints while keeping full JS/CDP metadata consistent.</td></tr>
+    <tr><td>Input realism</td><td>Adds CDP mouse timestamps, pointer type, and small movement interpolation when enabled.</td></tr>
+  </tbody>
+</table>
+
+## Profiles
+
+Use `--stealth-profile <name>` or `AGENT_BROWSER_STEALTH_PROFILE` to select the fingerprint profile:
+
+```bash
+agent-browser --stealth --stealth-profile chrome-windows open https://target.example
+agent-browser --stealth --stealth-profile chrome-mac open https://target.example
+agent-browser --stealth --stealth-profile chrome-linux open https://target.example
+```
+
+Available profiles:
+
+- `chrome-windows`
+- `chrome-mac`
+- `chrome-linux`
+- `mobile-android`
+- `mobile-ios`
+
+If no profile is provided, agent-browser chooses a desktop Chrome profile that matches the host OS where possible.
+
+## Advanced Configuration
+
+Advanced controls are set with `stealthOptions` in `agent-browser.json`:
+
+```json
+{
+  "stealth": true,
+  "stealthProfile": "chrome-mac",
+  "stealthOptions": {
+    "clientHintsMode": "accept-ch",
+    "inputRealism": "balanced",
+    "typingRealism": "off",
+    "blockWebRTC": true,
+    "useSystemChrome": false,
+    "clientHints": true,
+    "inputCoordinates": true
+  }
+}
+```
+
+<table>
+  <thead>
+    <tr><th>Option</th><th>Default</th><th>Description</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><code>blockWebRTC</code></td><td><code>true</code></td><td>Applies WebRTC launch/runtime restrictions.</td></tr>
+    <tr><td><code>useSystemChrome</code></td><td><code>false</code></td><td>Prefers an installed system Chrome/Chromium binary when available.</td></tr>
+    <tr><td><code>clientHints</code></td><td><code>true</code></td><td>Applies User-Agent Client Hints metadata and compatible headers.</td></tr>
+    <tr><td><code>clientHintsMode</code></td><td><code>accept-ch</code></td><td><code>low-entropy</code>, <code>accept-ch</code>, or <code>full</code>. Use <code>full</code> only in controlled lab tests because high-entropy headers are normally origin-requested.</td></tr>
+    <tr><td><code>inputCoordinates</code></td><td><code>true</code></td><td>Patches page-observed click coordinate artifacts.</td></tr>
+    <tr><td><code>inputRealism</code></td><td><code>balanced</code></td><td><code>off</code>, <code>balanced</code>, or <code>aggressive</code> for CDP mouse timestamping and movement interpolation.</td></tr>
+    <tr><td><code>typingRealism</code></td><td><code>off</code></td><td>Reserved typing cadence mode. It currently defaults off to keep typing deterministic.</td></tr>
+  </tbody>
+</table>
+
+The same controls can be set with environment variables:
+
+```bash
+AGENT_BROWSER_STEALTH=1
+AGENT_BROWSER_STEALTH_PROFILE=chrome-mac
+AGENT_BROWSER_STEALTH_CLIENT_HINTS_MODE=accept-ch
+AGENT_BROWSER_STEALTH_INPUT_REALISM=balanced
+AGENT_BROWSER_STEALTH_TYPING_REALISM=off
+AGENT_BROWSER_STEALTH_BLOCK_WEBRTC=1
+AGENT_BROWSER_STEALTH_USE_SYSTEM_CHROME=0
+AGENT_BROWSER_STEALTH_CLIENT_HINTS=1
+AGENT_BROWSER_STEALTH_INPUT_COORDINATES=1
+```
+
+## Operational Notes
+
+- Stealth setup is registered before navigation on local launch paths and re-applied when new CDP sessions attach.
+- Existing external CDP pages may already have executed page JavaScript before agent-browser connects; stealth is still registered for the next document and evaluated on the current context where possible.
+- Provider implementations can add their own stealth handling. The global `--stealth` flag and `AGENT_BROWSER_STEALTH` environment variable are forwarded where compatible.
+- For scoped security testing, combine stealth mode with `--allowed-domains`, `--action-policy`, and a dedicated browser profile or storage state.
+
+## Related Docs
+
+- [Configuration](/configuration)
+- [Security](/security)
+- [CDP Mode](/cdp-mode)

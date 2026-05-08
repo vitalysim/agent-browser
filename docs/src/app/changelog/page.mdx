@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### Fork Updates
+
+- **Stealth session hardening** - Expanded stealth setup from the active page to existing pages, new tabs, popups, CDP target attachments, cross-origin iframe sessions, and isolated recording contexts.
+- **Browser version alignment** - Stealth mode now reads `Browser.getVersion` and rewrites generated Chrome User-Agent and User-Agent Client Hints metadata to match the running browser version.
+- **Advanced stealth configuration** - Added `stealthOptions` plus `AGENT_BROWSER_STEALTH_*` environment variables for Client Hint mode, input realism, typing realism, WebRTC restrictions, system Chrome preference, Client Hints, and coordinate patching.
+- **Input event realism** - Added optional CDP mouse timestamps, pointer type, and small movement interpolation for authorized research scenarios.
+
+---
+
 ## v0.27.0
 
 <p className="text-[#888] text-sm">May 7, 2026</p>
