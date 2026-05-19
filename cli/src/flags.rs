@@ -58,6 +58,7 @@ pub struct Config {
     pub debug: Option<bool>,
     pub session: Option<String>,
     pub session_name: Option<String>,
+    pub import_session: Option<String>,
     pub executable_path: Option<String>,
     pub extensions: Option<Vec<String>>,
     pub init_scripts: Option<Vec<String>>,
@@ -171,6 +172,7 @@ impl Config {
             debug: other.debug.or(self.debug),
             session: other.session.or(self.session),
             session_name: other.session_name.or(self.session_name),
+            import_session: other.import_session.or(self.import_session),
             executable_path: other.executable_path.or(self.executable_path),
             extensions: match (self.extensions, other.extensions) {
                 (Some(mut a), Some(b)) => {
@@ -308,6 +310,7 @@ fn extract_config_path(args: &[String]) -> Option<Option<String>> {
         "--provider",
         "--device",
         "--session-name",
+        "--import-session",
         "--color-scheme",
         "--download-path",
         "--max-output",
@@ -392,6 +395,7 @@ pub struct Flags {
     pub device: Option<String>,
     pub auto_connect: bool,
     pub session_name: Option<String>,
+    pub import_session: Option<String>,
     pub annotate: bool,
     pub color_scheme: Option<String>,
     pub download_path: Option<String>,
@@ -541,6 +545,9 @@ pub fn parse_flags(args: &[String]) -> Flags {
         session_name: env::var("AGENT_BROWSER_SESSION_NAME")
             .ok()
             .or(config.session_name),
+        import_session: env::var("AGENT_BROWSER_IMPORT_SESSION")
+            .ok()
+            .or(config.import_session),
         annotate: env_var_is_truthy("AGENT_BROWSER_ANNOTATE") || config.annotate.unwrap_or(false),
         color_scheme: env::var("AGENT_BROWSER_COLOR_SCHEME")
             .ok()
@@ -802,6 +809,12 @@ pub fn parse_flags(args: &[String]) -> Flags {
                     i += 1;
                 }
             }
+            "--import-session" => {
+                if let Some(s) = args.get(i + 1) {
+                    flags.import_session = Some(s.clone());
+                    i += 1;
+                }
+            }
             "--annotate" => {
                 let (val, consumed) = parse_bool_arg(args, i);
                 flags.annotate = val;
@@ -986,6 +999,7 @@ pub fn clean_args(args: &[String]) -> Vec<String> {
         "--provider",
         "--device",
         "--session-name",
+        "--import-session",
         "--color-scheme",
         "--download-path",
         "--max-output",

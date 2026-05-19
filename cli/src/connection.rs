@@ -407,6 +407,7 @@ pub struct DaemonOptions<'a> {
     pub provider: Option<&'a str>,
     pub device: Option<&'a str>,
     pub session_name: Option<&'a str>,
+    pub import_session: Option<&'a str>,
     pub download_path: Option<&'a str>,
     pub allowed_domains: Option<&'a [String]>,
     pub action_policy: Option<&'a str>,
@@ -519,6 +520,9 @@ fn apply_daemon_env(cmd: &mut Command, session: &str, opts: &DaemonOptions) {
     }
     if let Some(sn) = opts.session_name {
         cmd.env("AGENT_BROWSER_SESSION_NAME", sn);
+    }
+    if let Some(name) = opts.import_session {
+        cmd.env("AGENT_BROWSER_IMPORT_SESSION", name);
     }
     if let Some(dp) = opts.download_path {
         cmd.env("AGENT_BROWSER_DOWNLOAD_PATH", dp);

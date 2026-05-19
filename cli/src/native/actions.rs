@@ -32,6 +32,7 @@ use super::react;
 use super::recording::{self, RecordingState};
 use super::screenshot::{self, ScreenshotOptions};
 use super::snapshot::{self, SnapshotOptions};
+use super::import;
 use super::state;
 use super::stealth;
 use super::storage;
@@ -1520,6 +1521,13 @@ async fn connect_auto_with_fresh_tab() -> Result<BrowserManager, String> {
 async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
     let mut options = launch_options_from_env();
 
+    // Resolve a session bundle (if any) BEFORE stealth-config UA derivation
+    // so the bundle's UA + UA-CH flow into Chrome's --user-agent= launch flag.
+    // The bundle is then re-loaded post-launch via try_apply_imported_bundle.
+    if let Some((ref manifest, _, _)) = resolve_imported_bundle() {
+        apply_bundle_to_stealth_config(&mut options.stealth, manifest);
+    }
+
     if options.user_agent.is_none() {
         if let Some(ref stealth_config) = options.stealth {
             options.user_agent = Some(stealth::user_agent(stealth_config));
@@ -1563,6 +1571,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         prepare_launch_init_scripts(state).await;
         try_auto_restore_state(state).await;
         try_load_storage_state(state, &storage_state_path).await;
+        try_apply_imported_bundle(state).await;
         return Ok(());
     }
 
@@ -1576,6 +1585,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
         prepare_launch_init_scripts(state).await;
         try_auto_restore_state(state).await;
         try_load_storage_state(state, &storage_state_path).await;
+        try_apply_imported_bundle(state).await;
         return Ok(());
     }
 
@@ -1612,6 +1622,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
                     prepare_launch_init_scripts(state).await;
                     try_auto_restore_state(state).await;
                     try_load_storage_state(state, &storage_state_path).await;
+                    try_apply_imported_bundle(state).await;
                     return Ok(());
                 }
                 Err(e) => {
@@ -1646,6 +1657,7 @@ async fn auto_launch(state: &mut DaemonState) -> Result<(), String> {
     prepare_launch_init_scripts(state).await;
     try_auto_restore_state(state).await;
     try_load_storage_state(state, &storage_state_path).await;
+    try_apply_imported_bundle(state).await;
     Ok(())
 }
 
@@ -1715,9 +1727,24 @@ async fn refresh_stealth_browser_version(state: &mut DaemonState) {
         || state.launch_user_agent.as_deref() == Some(&generated_ua);
 
     if let Some(ref mut stealth_config) = state.stealth {
+        // Capture the bundle's expected major BEFORE apply_browser_version
+        // overwrites chrome_major_version with what the running Chrome says.
+        let bundle_major = stealth_config.bundle_chrome_major_version.clone();
         stealth_config.apply_browser_version(product.as_deref(), browser_ua.as_deref());
         if should_update_ua {
             state.launch_user_agent = Some(stealth::user_agent(stealth_config));
+        }
+        if let (Some(expected), Some(actual)) =
+            (bundle_major, stealth_config.chrome_major_version.clone())
+        {
+            if expected != actual {
+                eprintln!(
+                    "{} session bundle was captured on Chrome {} but launched browser is Chrome {} — CloudFlare may re-challenge.",
+                    crate::color::warning_indicator(),
+                    expected,
+                    actual,
+                );
+            }
         }
     }
 }
@@ -1994,6 +2021,91 @@ async fn try_load_storage_state(state: &DaemonState, path: &Option<String>) {
     let _ = load_storage_state(state, path).await;
 }
 
+/// Resolve the `AGENT_BROWSER_IMPORT_SESSION` env var to a loaded bundle.
+/// Returns `None` when the var is unset, the bundle is missing, or the
+/// manifest fails to parse — in all those cases the launch proceeds without
+/// the bundle and a warning is printed once.
+fn resolve_imported_bundle() -> Option<(
+    import::Bundle,
+    Vec<serde_json::Value>,
+    Option<super::state::StorageState>,
+)> {
+    let name = env::var("AGENT_BROWSER_IMPORT_SESSION").ok()?;
+    if name.is_empty() {
+        return None;
+    }
+    match import::load_bundle(&name) {
+        Ok(triple) => Some(triple),
+        Err(e) => {
+            eprintln!(
+                "{} --import-session: {}",
+                crate::color::warning_indicator(),
+                e
+            );
+            None
+        }
+    }
+}
+
+/// Layer the bundle's UA / UA-CH / accept-language on top of `stealth_config`,
+/// creating a default StealthConfig when the user didn't ask for stealth but a
+/// bundle is present (UA-CH spoofing requires the stealth init script).
+fn apply_bundle_to_stealth_config(
+    stealth_config: &mut Option<stealth::StealthConfig>,
+    manifest: &import::Bundle,
+) {
+    if stealth_config.is_none() {
+        *stealth_config = stealth::StealthConfig::new(true, None);
+    }
+    let Some(config) = stealth_config.as_mut() else {
+        return;
+    };
+    config.apply_bundle(
+        manifest.user_agent.as_deref(),
+        &manifest.ua_ch,
+        manifest.accept_language.as_deref(),
+        manifest.source_chrome_full_version.as_deref(),
+        manifest.source_chrome_major_version.as_deref(),
+    );
+}
+
+/// Post-launch: replay cookies + headers + storage from the bundle to the
+/// current session. Called after `prepare_launch_init_scripts` so the
+/// stealth init script (which patches userAgentData) is in place first.
+async fn apply_imported_bundle_post_launch(
+    state: &DaemonState,
+    manifest: &import::Bundle,
+    cookies: &[serde_json::Value],
+    storage_state: Option<&super::state::StorageState>,
+) {
+    let Some(ref mgr) = state.browser else {
+        return;
+    };
+    let Ok(session_id) = mgr.active_session_id() else {
+        return;
+    };
+    if let Err(e) =
+        import::apply_bundle_to_session(&mgr.client, session_id, manifest, cookies, storage_state)
+            .await
+    {
+        eprintln!(
+            "{} --import-session: failed to apply bundle: {}",
+            crate::color::warning_indicator(),
+            e
+        );
+    }
+}
+
+/// Convenience wrapper that re-resolves the bundle from env vars and applies
+/// it. Callers in `auto_launch` / `handle_launch` use this so the bundle apply
+/// runs on every successful launch branch (default Chrome, CDP, auto-connect,
+/// provider) with a single call site each.
+async fn try_apply_imported_bundle(state: &DaemonState) {
+    if let Some((manifest, cookies, storage)) = resolve_imported_bundle() {
+        apply_imported_bundle_post_launch(state, &manifest, &cookies, storage.as_ref()).await;
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Phase 1 handlers
 // ---------------------------------------------------------------------------
@@ -2018,7 +2130,12 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         });
     let storage_state = cmd.get("storageState").and_then(|v| v.as_str());
     let storage_state_owned = storage_state.map(|s| s.to_string());
-    let stealth_config = stealth::config_from_command(cmd);
+    let mut stealth_config = stealth::config_from_command(cmd);
+    // Layer in a session bundle (--import-session) before deriving the
+    // launch UA so the bundle's UA flows into Chrome's --user-agent= flag.
+    if let Some((ref manifest, _, _)) = resolve_imported_bundle() {
+        apply_bundle_to_stealth_config(&mut stealth_config, manifest);
+    }
     let mut launch_user_agent = cmd
         .get("userAgent")
         .and_then(|v| v.as_str())
@@ -2131,6 +2248,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
     } else {
         load_storage_state(state, &storage_state_owned).await?;
         prepare_launch_init_scripts(state).await;
+        try_apply_imported_bundle(state).await;
         return Ok(json!({ "launched": true, "reused": true }));
     }
     state.ref_map.clear();
@@ -2154,6 +2272,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         state.update_stream_client().await;
         load_storage_state_or_rollback(state, &storage_state_owned).await?;
         prepare_launch_init_scripts(state).await;
+        try_apply_imported_bundle(state).await;
         return Ok(json!({ "launched": true }));
     }
 
@@ -2166,6 +2285,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         state.update_stream_client().await;
         load_storage_state_or_rollback(state, &storage_state_owned).await?;
         prepare_launch_init_scripts(state).await;
+        try_apply_imported_bundle(state).await;
         return Ok(json!({ "launched": true }));
     }
 
@@ -2178,6 +2298,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
         state.update_stream_client().await;
         load_storage_state_or_rollback(state, &storage_state_owned).await?;
         prepare_launch_init_scripts(state).await;
+        try_apply_imported_bundle(state).await;
         return Ok(json!({ "launched": true }));
     }
 
@@ -2216,6 +2337,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
                         write_provider_file(&state.session_id, provider);
                         load_storage_state_or_rollback(state, &storage_state_owned).await?;
                         prepare_launch_init_scripts(state).await;
+                        try_apply_imported_bundle(state).await;
 
                         if let Some(info) = providers::get_agentcore_info() {
                             return Ok(json!({
@@ -2314,6 +2436,7 @@ async fn handle_launch(cmd: &Value, state: &mut DaemonState) -> Result<Value, St
     load_storage_state_or_rollback(state, &storage_state_owned).await?;
 
     prepare_launch_init_scripts(state).await;
+    try_apply_imported_bundle(state).await;
 
     Ok(json!({ "launched": true }))
 }

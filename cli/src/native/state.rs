@@ -14,14 +14,14 @@ use super::cdp::types::{
 };
 use super::cookies::{self, Cookie};
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageState {
     pub cookies: Vec<Cookie>,
     pub origins: Vec<OriginStorage>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OriginStorage {
     pub origin: String,
@@ -30,7 +30,7 @@ pub struct OriginStorage {
     pub session_storage: Vec<StorageEntry>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct StorageEntry {
     pub name: String,
@@ -366,7 +366,18 @@ pub async fn load_state(client: &CdpClient, session_id: &str, path: &str) -> Res
     let state: StorageState =
         serde_json::from_str(&json_str).map_err(|e| format!("Invalid state file: {}", e))?;
 
-    // Load cookies
+    load_state_value(client, session_id, &state).await
+}
+
+/// Apply an already-deserialised `StorageState` to the session: set cookies,
+/// then navigate to each origin and replay localStorage/sessionStorage.
+/// Extracted from `load_state` so the session-bundle path can reuse it
+/// without round-tripping through a temp JSON file on disk.
+pub async fn load_state_value(
+    client: &CdpClient,
+    session_id: &str,
+    state: &StorageState,
+) -> Result<(), String> {
     if !state.cookies.is_empty() {
         let cookie_values: Vec<Value> = state
             .cookies
@@ -376,13 +387,11 @@ pub async fn load_state(client: &CdpClient, session_id: &str, path: &str) -> Res
         cookies::set_cookies(client, session_id, cookie_values, None).await?;
     }
 
-    // Load storage per origin
     for origin in &state.origins {
         if origin.local_storage.is_empty() && origin.session_storage.is_empty() {
             continue;
         }
 
-        // Navigate to origin to set storage
         let navigate_url = format!("{}/", origin.origin.trim_end_matches('/'));
         client
             .send_command(
@@ -392,7 +401,6 @@ pub async fn load_state(client: &CdpClient, session_id: &str, path: &str) -> Res
             )
             .await?;
 
-        // Brief wait for navigation
         tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
 
         for entry in &origin.local_storage {
@@ -608,6 +616,14 @@ pub fn state_rename(old_path: &str, new_name: &str) -> Result<Value, String> {
         "from": old_path,
         "to": new_path.to_string_lossy(),
     }))
+}
+
+pub(crate) fn encrypt_for_bundle(data: &[u8], key_str: &str) -> Result<Vec<u8>, String> {
+    encrypt_data(data, key_str)
+}
+
+pub(crate) fn decrypt_for_bundle(data: &[u8], key_str: &str) -> Result<Vec<u8>, String> {
+    decrypt_data(data, key_str)
 }
 
 fn encrypt_data(data: &[u8], key_str: &str) -> Result<Vec<u8>, String> {

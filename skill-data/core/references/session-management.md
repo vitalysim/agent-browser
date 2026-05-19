@@ -2,7 +2,19 @@
 
 Multiple isolated browser sessions with state persistence and concurrent browsing.
 
-**Related**: [authentication.md](authentication.md) for login patterns, [SKILL.md](../SKILL.md) for quick start.
+**Related**: [authentication.md](authentication.md) for login patterns, [session-bundles.md](session-bundles.md) for reusing a real browser's cookies + UA + UA-CH under CloudFlare, [SKILL.md](../SKILL.md) for quick start.
+
+## Choosing a persistence mechanism
+
+agent-browser exposes four overlapping ways to persist or restore session
+state. Pick by what you actually need:
+
+| You want… | Use | Notes |
+|---|---|---|
+| Reuse your real Chrome profile (Default, Work, etc.) | `--profile <name>` | Reads your existing Chrome login state. Fast for personal automation; not isolated from your daily browsing. |
+| A named, auto-saving session that survives restarts | `--session-name <name>` | Saves cookies + localStorage to `~/.agent-browser/sessions/<name>-*.json` on close, reloads on start. |
+| Load a Playwright-style state JSON you exported earlier | `--state <path>` | One-off load; doesn't auto-save. Pair with `state save <path>` to capture. |
+| Authenticate behind CloudFlare or any bot manager that pins auth to UA + UA-CH + IP | `session import` + `--import-session <name>` | Captures cookies **and** fingerprint headers as one named bundle. Same-IP requirement. See [session-bundles.md](session-bundles.md). |
 
 ## Contents
 

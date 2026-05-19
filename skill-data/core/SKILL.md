@@ -209,6 +209,45 @@ AGENT_BROWSER_SESSION_NAME=my-app agent-browser open https://app.example.com
 # State is auto-saved and restored on subsequent runs with the same name.
 ```
 
+### Reuse a CloudFlare-protected session
+
+If the user is already logged in to a site that sits behind CloudFlare (or
+another bot manager that pins auth to fingerprint), the regular cookie-import
+path will fail on the next request — `cf_clearance` is also bound to UA +
+every `sec-ch-ua-*` client hint + the egress IP. The fix is `session import`,
+which captures the full request signature as one reusable named bundle:
+
+```bash
+# 1. User pastes DevTools "Request headers" view, or pipes via stdin.
+pbpaste | agent-browser session import --from - --name h1
+
+# 2. Inspect what was captured (values redacted; only names shown for cookies).
+agent-browser session show h1
+
+# 3. Launch with the bundle. Implies --stealth; UA + UA-CH override the base
+#    stealth profile so the agent's fingerprint matches what minted the cookie.
+agent-browser --import-session h1 open https://hackerone.com/bugs
+agent-browser snapshot -i   # confirm logged-in state
+```
+
+Auto-detects four input formats: DevTools headers paste, `curl ... -H ...`,
+HAR file, Playwright `state load`-compatible JSON. Use `--format <name>` to
+override.
+
+Important constraints to surface to the user when this fails:
+- **IP must match.** `cf_clearance` is bound to the egress IP that minted it.
+  Run the agent on the same machine as the source browser, or route through a
+  same-IP proxy (Tailscale / SSH SOCKS). If you moved networks, re-import.
+- **Chrome major version must match.** agent-browser prints a one-line warning
+  at launch when the running Chromium's major differs from the bundle's. The
+  fix is upgrading local Chrome to match (or re-importing from a newer
+  browser session).
+- **No Turnstile auto-solve.** If CloudFlare presents a fresh challenge,
+  solve it in your real browser, re-paste the headers, and re-import.
+
+See [references/session-bundles.md](references/session-bundles.md) for the
+canonical runbook, the four supported input formats, and troubleshooting.
+
 ### Stealth mode for authorized research
 
 Use stealth mode only for authorized vulnerability research, application
@@ -421,6 +460,20 @@ Use `--session-name <name>` or `state save`/`state load` so your session
 survives browser restarts. See [references/session-management.md](references/session-management.md)
 and [references/authentication.md](references/authentication.md).
 
+**CloudFlare returns 403 / shows a challenge after `--import-session`**
+Three causes, in priority order:
+
+1. **Egress IP changed** since the bundle was captured. `cf_clearance` is
+   IP-bound. Run the agent on the same machine as the source browser, or
+   add a same-IP proxy (Tailscale / SSH SOCKS). Re-import after moving.
+2. **Chrome major version mismatch.** Look for a stderr warning at launch
+   along the lines of "bundle was captured on Chrome 148 but launched
+   browser is Chrome 144." Upgrade local Chrome to match, or re-import
+   from a session in the matching browser version.
+3. **Cookie expired.** `cf_clearance` is short-lived. Re-paste the headers
+   from a fresh authenticated request and `session import --name <same>`
+   to overwrite. See [references/session-bundles.md](references/session-bundles.md).
+
 ## Global flags worth knowing
 
 ```bash
@@ -434,6 +487,8 @@ and [references/authentication.md](references/authentication.md).
 --proxy <url>           # proxy server
 --state <path>          # load saved auth state from JSON
 --session-name <name>   # auto-save/restore session state by name
+--import-session <name> # apply a saved session bundle (cookies + UA + UA-CH);
+                        # see "Reuse a CloudFlare-protected session" above
 ```
 
 ## When to load another skill
@@ -490,6 +545,7 @@ That pulls in:
 - `references/authentication.md` — auth vault, credential handling
 - `references/trust-boundaries.md` — safety rules for driving a real browser
 - `references/session-management.md` — persistence, multi-session workflows
+- `references/session-bundles.md` — paste a real browser's headers + cookies, reuse them across runs under CloudFlare
 - `references/profiling.md` — Chrome DevTools tracing and profiling
 - `references/video-recording.md` — video capture options
 - `references/proxy-support.md` — proxy configuration

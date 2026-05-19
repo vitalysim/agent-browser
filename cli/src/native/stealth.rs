@@ -23,6 +23,20 @@ pub struct StealthConfig {
     pub typing_realism: TypingRealismMode,
     pub chrome_major_version: Option<String>,
     pub chrome_full_version: Option<String>,
+    /// UA captured from an imported session bundle (overrides the base
+    /// stealth profile's UA when present).
+    pub bundle_user_agent: Option<String>,
+    /// Every `sec-ch-ua-*` header captured from the bundle, lower-cased.
+    /// Layered into the resulting `StealthProfile.client_hints` so the
+    /// existing init script + Network.setExtraHTTPHeaders pipeline picks them
+    /// up without a separate codepath.
+    pub bundle_ua_ch: std::collections::BTreeMap<String, String>,
+    /// `accept-language` captured from the bundle; takes precedence over
+    /// the profile default in `accept_language()`.
+    pub bundle_accept_language: Option<String>,
+    /// Chrome major version parsed from the bundle (e.g. `"148"`), used
+    /// for the runtime version-mismatch warning.
+    pub bundle_chrome_major_version: Option<String>,
 }
 
 impl StealthConfig {
@@ -43,6 +57,10 @@ impl StealthConfig {
             typing_realism: TypingRealismMode::Off,
             chrome_major_version: None,
             chrome_full_version: None,
+            bundle_user_agent: None,
+            bundle_ua_ch: std::collections::BTreeMap::new(),
+            bundle_accept_language: None,
+            bundle_chrome_major_version: None,
         })
     }
 
@@ -50,6 +68,43 @@ impl StealthConfig {
         if let Some((major, full)) = parse_chrome_version(product, user_agent) {
             self.chrome_major_version = Some(major);
             self.chrome_full_version = Some(full);
+        }
+    }
+
+    /// Apply a session-bundle's UA, UA-CH, accept-language, and Chrome
+    /// version on top of the base stealth profile. Subsequent calls to
+    /// `profile_for_config`, `user_agent`, `accept_language`, and
+    /// `user_agent_metadata` will reflect the bundle.
+    pub fn apply_bundle(
+        &mut self,
+        user_agent: Option<&str>,
+        ua_ch: &std::collections::BTreeMap<String, String>,
+        accept_language: Option<&str>,
+        bundle_chrome_full_version: Option<&str>,
+        bundle_chrome_major_version: Option<&str>,
+    ) {
+        if let Some(ua) = user_agent {
+            self.bundle_user_agent = Some(ua.to_string());
+            // Feed UA into the existing version-rewrite path so
+            // chrome_major_version / chrome_full_version reflect the bundle
+            // (this is what client-hints.js consumes downstream).
+            self.apply_browser_version(None, Some(ua));
+        }
+        if !ua_ch.is_empty() {
+            self.bundle_ua_ch = ua_ch.clone();
+        }
+        if let Some(al) = accept_language {
+            self.bundle_accept_language = Some(al.to_string());
+        }
+        if let Some(full) = bundle_chrome_full_version {
+            // Override what apply_browser_version inferred, since UA-CH is
+            // higher-fidelity than the UA string (UA is increasingly frozen
+            // to a major-only version like "148.0.0.0").
+            self.chrome_full_version = Some(full.to_string());
+        }
+        if let Some(major) = bundle_chrome_major_version {
+            self.chrome_major_version = Some(major.to_string());
+            self.bundle_chrome_major_version = Some(major.to_string());
         }
     }
 }
@@ -215,22 +270,93 @@ pub fn profile(name: Option<&str>) -> StealthProfile {
 
 pub fn profile_for_config(config: &StealthConfig) -> StealthProfile {
     let mut profile = profile(config.profile_name.as_deref());
-    let Some(ref full_version) = config.chrome_full_version else {
-        return profile;
-    };
-    let major_version = config
-        .chrome_major_version
-        .as_deref()
-        .or_else(|| full_version.split('.').next())
-        .unwrap_or("144");
 
-    profile.user_agent = rewrite_chrome_version(&profile.user_agent, full_version);
-    if let Some(ref mut hints) = profile.client_hints {
-        rewrite_brand_versions(&mut hints.brands, major_version, "24");
-        rewrite_brand_versions(&mut hints.full_version_list, full_version, "24.0.0.0");
+    if let Some(ref full_version) = config.chrome_full_version {
+        let major_version = config
+            .chrome_major_version
+            .as_deref()
+            .or_else(|| full_version.split('.').next())
+            .unwrap_or("144");
+
+        profile.user_agent = rewrite_chrome_version(&profile.user_agent, full_version);
+        if let Some(ref mut hints) = profile.client_hints {
+            rewrite_brand_versions(&mut hints.brands, major_version, "24");
+            rewrite_brand_versions(&mut hints.full_version_list, full_version, "24.0.0.0");
+        }
+    }
+
+    if let Some(ref ua) = config.bundle_user_agent {
+        profile.user_agent = ua.clone();
+    }
+    if !config.bundle_ua_ch.is_empty() {
+        let merged = layer_bundle_client_hints(profile.client_hints.take(), &config.bundle_ua_ch);
+        profile.client_hints = merged;
     }
 
     profile
+}
+
+/// Build/override a `ClientHintsData` from raw `sec-ch-ua-*` header strings.
+/// Falls back to the base profile's existing fields for anything the bundle
+/// didn't capture, so a partial UA-CH set (e.g. low-entropy only) still
+/// produces a coherent `navigator.userAgentData`.
+fn layer_bundle_client_hints(
+    base: Option<ClientHintsData>,
+    bundle: &std::collections::BTreeMap<String, String>,
+) -> Option<ClientHintsData> {
+    let mut hints = base.unwrap_or_else(|| ClientHintsData {
+        brands: Vec::new(),
+        full_version_list: Vec::new(),
+        mobile: false,
+        platform: String::new(),
+        platform_version: String::new(),
+        architecture: String::new(),
+        bitness: String::new(),
+        model: String::new(),
+    });
+
+    if let Some(raw) = bundle.get("sec-ch-ua") {
+        let parsed = crate::native::import::split_brand_list(raw);
+        if !parsed.is_empty() {
+            hints.brands = parsed
+                .into_iter()
+                .map(|(brand, version)| BrandVersion { brand, version })
+                .collect();
+        }
+    }
+    if let Some(raw) = bundle.get("sec-ch-ua-full-version-list") {
+        let parsed = crate::native::import::split_brand_list(raw);
+        if !parsed.is_empty() {
+            hints.full_version_list = parsed
+                .into_iter()
+                .map(|(brand, version)| BrandVersion { brand, version })
+                .collect();
+        }
+    }
+    if let Some(raw) = bundle.get("sec-ch-ua-mobile") {
+        hints.mobile = raw.trim() == "?1";
+    }
+    if let Some(raw) = bundle.get("sec-ch-ua-platform") {
+        hints.platform = strip_quotes(raw);
+    }
+    if let Some(raw) = bundle.get("sec-ch-ua-platform-version") {
+        hints.platform_version = strip_quotes(raw);
+    }
+    if let Some(raw) = bundle.get("sec-ch-ua-arch") {
+        hints.architecture = strip_quotes(raw);
+    }
+    if let Some(raw) = bundle.get("sec-ch-ua-bitness") {
+        hints.bitness = strip_quotes(raw);
+    }
+    if let Some(raw) = bundle.get("sec-ch-ua-model") {
+        hints.model = strip_quotes(raw);
+    }
+
+    Some(hints)
+}
+
+fn strip_quotes(value: &str) -> String {
+    value.trim().trim_matches('"').to_string()
 }
 
 fn parse_chrome_version(
@@ -489,6 +615,11 @@ pub fn user_agent_platform(config: &StealthConfig) -> String {
 }
 
 pub fn accept_language(config: &StealthConfig) -> String {
+    if let Some(ref al) = config.bundle_accept_language {
+        if !al.trim().is_empty() {
+            return al.clone();
+        }
+    }
     let p = profile_for_config(config);
     if p.languages.is_empty() {
         return "en-US,en;q=0.9".to_string();
@@ -1408,6 +1539,68 @@ mod tests {
             Some("\"x86\"")
         );
         assert!(headers.contains_key("sec-ch-ua-full-version-list"));
+    }
+
+    #[test]
+    fn apply_bundle_overrides_ua_and_client_hints() {
+        let mut config = StealthConfig::new(true, Some("chrome-mac".to_string())).unwrap();
+        let mut ua_ch = std::collections::BTreeMap::new();
+        ua_ch.insert(
+            "sec-ch-ua".to_string(),
+            "\"Chromium\";v=\"148\", \"Not/A)Brand\";v=\"99\"".to_string(),
+        );
+        ua_ch.insert(
+            "sec-ch-ua-full-version-list".to_string(),
+            "\"Chromium\";v=\"148.0.7778.97\", \"Not/A)Brand\";v=\"99.0.0.0\"".to_string(),
+        );
+        ua_ch.insert("sec-ch-ua-mobile".to_string(), "?0".to_string());
+        ua_ch.insert("sec-ch-ua-platform".to_string(), "\"macOS\"".to_string());
+        ua_ch.insert(
+            "sec-ch-ua-platform-version".to_string(),
+            "\"26.4.1\"".to_string(),
+        );
+        ua_ch.insert("sec-ch-ua-arch".to_string(), "\"arm\"".to_string());
+        ua_ch.insert("sec-ch-ua-bitness".to_string(), "\"64\"".to_string());
+        config.apply_bundle(
+            Some("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) Chrome/148.0.0.0 Safari/537.36"),
+            &ua_ch,
+            Some("en-US,en;q=0.9"),
+            Some("148.0.7778.97"),
+            Some("148"),
+        );
+        let ua = user_agent(&config);
+        assert!(ua.contains("Chrome/148"), "user_agent={}", ua);
+        let metadata = user_agent_metadata(&config).unwrap();
+        let platform = metadata.get("platform").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(platform, "macOS");
+        let arch = metadata.get("architecture").and_then(|v| v.as_str()).unwrap();
+        assert_eq!(arch, "arm");
+        let platform_version = metadata
+            .get("platformVersion")
+            .and_then(|v| v.as_str())
+            .unwrap();
+        assert_eq!(platform_version, "26.4.1");
+        let full_version_list = metadata
+            .get("fullVersionList")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        let chromium_entry = full_version_list
+            .iter()
+            .find(|e| e.get("brand").and_then(|v| v.as_str()) == Some("Chromium"))
+            .unwrap();
+        assert_eq!(
+            chromium_entry.get("version").and_then(|v| v.as_str()),
+            Some("148.0.7778.97")
+        );
+        assert_eq!(accept_language(&config), "en-US,en;q=0.9");
+    }
+
+    #[test]
+    fn bundle_accept_language_takes_precedence() {
+        let mut config = StealthConfig::new(true, Some("chrome-windows".to_string())).unwrap();
+        let empty = std::collections::BTreeMap::new();
+        config.apply_bundle(None, &empty, Some("fr-FR,fr;q=0.9,en;q=0.5"), None, None);
+        assert_eq!(accept_language(&config), "fr-FR,fr;q=0.9,en;q=0.5");
     }
 
     #[test]

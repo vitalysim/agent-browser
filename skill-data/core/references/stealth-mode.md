@@ -24,6 +24,25 @@ Profiles:
 If no profile is provided, agent-browser chooses a desktop Chrome profile
 matching the host OS where possible.
 
+## For CloudFlare-protected origins: prefer a session bundle
+
+Synthetic stealth profiles guess a plausible UA + UA-CH. For sites that
+actually *validate* the fingerprint against the cookie that minted it
+(CloudFlare's `cf_clearance`, Akamai Bot Manager, etc.), the safest path is
+to capture UA + UA-CH from the real browser that already passed the
+challenge:
+
+```bash
+pbpaste | agent-browser session import --from - --name <name>
+agent-browser --import-session <name> open https://protected.example
+```
+
+`--import-session` implies `--stealth` and overrides the synthetic profile's
+UA + every `sec-ch-ua-*` header. Use `--stealth-profile <base>` alongside
+when you want the base profile to pick OS scaffolding (screen size, WebGL
+renderer, etc.) while the bundle overrides UA-CH. See
+[session-bundles.md](session-bundles.md) for the full runbook.
+
 ## Capabilities
 
 - **Launch hardening** - Adds Chromium launch flags that reduce common

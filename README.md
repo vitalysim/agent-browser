@@ -267,6 +267,14 @@ agent-browser cookies set --curl <file> # Import cookies from a Copy-as-cURL dum
                                         # JSON array, or bare Cookie header (auto-detected)
 agent-browser cookies clear           # Clear cookies
 
+# Reusable session bundles — paste cookies + UA + sec-ch-ua-* once,
+# replay on every run (CloudFlare-friendly when run on the same machine).
+agent-browser session import --from <path|-> --name <bundle> [--format auto|devtools|curl|har|state]
+agent-browser session bundles         # List saved bundles
+agent-browser session show <bundle>   # Inspect a bundle's UA, UA-CH, origin
+agent-browser session delete <bundle> # Remove a bundle
+agent-browser --import-session <bundle> open <url>  # Launch with the bundle applied
+
 agent-browser storage local           # Get all localStorage
 agent-browser storage local <key>     # Get specific key
 agent-browser storage local set <k> <v>  # Set value
@@ -483,6 +491,7 @@ agent-browser provides multiple ways to persist login sessions so you don't re-a
 | **Persistent profile** | Full browser state (cookies, IndexedDB, service workers, cache) across restarts | `--profile <path>` / `AGENT_BROWSER_PROFILE` |
 | **Session persistence** | Auto-save/restore cookies + localStorage by name | `--session-name <name>` / `AGENT_BROWSER_SESSION_NAME` |
 | **Import from your browser** | Grab auth from a Chrome session you already logged into | `--auto-connect` + `state save` |
+| **Session bundle (CloudFlare-friendly)** | Paste DevTools headers (cookies + UA + every `sec-ch-ua-*`) once, replay on every run with matching fingerprint | `session import` + `--import-session <name>` |
 | **State file** | Load a previously saved state JSON on launch | `--state <path>` / `AGENT_BROWSER_STATE` |
 | **Auth vault** | Store credentials locally (encrypted), login by name | `auth save` / `auth login` |
 
@@ -510,6 +519,36 @@ agent-browser --session-name myapp state load ./my-auth.json
 > **Security notes:**
 > - `--remote-debugging-port` exposes full browser control on localhost. Any local process can connect. Only use on trusted machines and close Chrome when done.
 > - State files contain session tokens in plaintext. Add them to `.gitignore` and delete when no longer needed. For encryption at rest, set `AGENT_BROWSER_ENCRYPTION_KEY` (see [State Encryption](#state-encryption)).
+
+### Reuse a CloudFlare-protected session
+
+If a target sits behind CloudFlare (or another bot manager that pins auth to fingerprint), the regular cookie-import path is not enough: `cf_clearance` is also bound to the egress IP, the UA string, and every `sec-ch-ua-*` Client Hint that minted it. `session import` captures all of that as one reusable bundle so the agent presents the same signature on every run.
+
+```bash
+# 1. In Chrome, log in to the target. Open DevTools → Network →
+#    pick any successful authenticated request → right-click → Copy →
+#    "Copy request headers". Paste the result into a file (or pipe stdin).
+
+# 2. Create a named session bundle. Auto-detects DevTools paste / cURL / HAR /
+#    storage-state. cf_clearance, cookies, UA, and every sec-ch-ua-* header
+#    are extracted in one shot.
+pbpaste | agent-browser session import --from - --name h1
+
+# 3. Inspect what got captured (cookie names only — values stay on disk).
+agent-browser session show h1
+
+# 4. Launch with the bundle applied. Implies --stealth; the bundle's UA-CH
+#    flow through Emulation.setUserAgentOverride and Network.setExtraHTTPHeaders.
+agent-browser --import-session h1 open https://hackerone.com/bugs
+agent-browser snapshot -i   # confirm logged-in state
+```
+
+The bundle works because (a) you run the agent on the same machine, so the egress IP matches what minted `cf_clearance`, and (b) UA + every `sec-ch-ua-*` is replayed exactly. If your local Chromium's major version differs from the bundle's, agent-browser prints a one-line warning at launch — upgrade Chrome to match, or re-import.
+
+> **Limits**
+> - Same-IP requirement: if you move networks (different Wi-Fi, VPN on/off, server with a different egress), CloudFlare will challenge again. Re-import.
+> - Stock Chromium TLS is used; this is fine for CF when major version + UA-CH align. No JA3/JA4 customisation, no Turnstile auto-solve.
+> - Bundles store auth cookies on disk under `~/.agent-browser/sessions/<name>/`. Honour `AGENT_BROWSER_ENCRYPTION_KEY` (the same env var state files use) for at-rest encryption.
 
 For full details on login flows, OAuth, 2FA, cookie-based auth, and the auth vault, see the [Authentication](docs/src/app/sessions/page.mdx) docs.
 
@@ -699,6 +738,7 @@ This is useful for multimodal AI models that can reason about visual layout, unl
 | `--session-name <name>` | Auto-save/restore session state (or `AGENT_BROWSER_SESSION_NAME` env) |
 | `--profile <name\|path>` | Chrome profile name or persistent directory path (or `AGENT_BROWSER_PROFILE` env) |
 | `--state <path>` | Load storage state from JSON file (or `AGENT_BROWSER_STATE` env) |
+| `--import-session <name>` | Apply a saved session bundle (cookies + UA + UA-CH + accept-language) — see [Reuse a CloudFlare-protected session](#reuse-a-cloudflare-protected-session). Cannot combine with `--profile`. Implies `--stealth`. |
 | `--headers <json>` | Set HTTP headers scoped to the URL's origin |
 | `--executable-path <path>` | Custom browser executable (or `AGENT_BROWSER_EXECUTABLE_PATH` env) |
 | `--extension <path>` | Load browser extension (repeatable; or `AGENT_BROWSER_EXTENSIONS` env) |

@@ -126,7 +126,7 @@ pub fn parse_curl_cookies(raw: &str) -> Result<Vec<Value>, String> {
     parse_cookie_header(&header)
 }
 
-fn extract_cookie_header_from_curl(curl: &str) -> Option<String> {
+pub(crate) fn extract_cookie_header_from_curl(curl: &str) -> Option<String> {
     // Strip bash (`\`) and cmd (`^`) line continuations so -H is on one line.
     let joined = curl
         .replace("\\\r\n", " ")
@@ -203,7 +203,54 @@ fn match_quoted_arg(haystack: &str, flag: &str, expect_header: Option<&str>) -> 
     None
 }
 
-fn parse_cookie_header(header: &str) -> Result<Vec<Value>, String> {
+/// Like [`match_quoted_arg`] but returns every occurrence of `flag '<value>'`
+/// in the haystack. Used by the cURL session-bundle parser to harvest all
+/// `-H 'name: value'` headers from a single cURL command.
+pub(crate) fn match_all_quoted_args(haystack: &str, flag: &str) -> Vec<String> {
+    let bytes = haystack.as_bytes();
+    let flag_b = flag.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + flag_b.len() < bytes.len() {
+        if &bytes[i..i + flag_b.len()] != flag_b {
+            i += 1;
+            continue;
+        }
+        if i > 0 && !bytes[i - 1].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        let mut j = i + flag_b.len();
+        if j >= bytes.len() || !bytes[j].is_ascii_whitespace() {
+            i += 1;
+            continue;
+        }
+        while j < bytes.len() && bytes[j].is_ascii_whitespace() {
+            j += 1;
+        }
+        if j >= bytes.len() {
+            break;
+        }
+        let quote = bytes[j];
+        if quote != b'\'' && quote != b'"' {
+            i = j;
+            continue;
+        }
+        let start = j + 1;
+        let mut k = start;
+        while k < bytes.len() && bytes[k] != quote {
+            k += 1;
+        }
+        if k >= bytes.len() {
+            break;
+        }
+        out.push(String::from_utf8_lossy(&bytes[start..k]).into_owned());
+        i = k + 1;
+    }
+    out
+}
+
+pub(crate) fn parse_cookie_header(header: &str) -> Result<Vec<Value>, String> {
     let mut out = Vec::new();
     for piece in header.split(';') {
         let piece = piece.trim();
@@ -2704,6 +2751,7 @@ mod tests {
             device: None,
             auto_connect: false,
             session_name: None,
+            import_session: None,
             cli_executable_path: false,
             cli_extensions: false,
             cli_init_scripts: false,

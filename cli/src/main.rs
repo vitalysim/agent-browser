@@ -254,6 +254,10 @@ fn run_session(args: &[String], session: &str, json_mode: bool) {
                 }
             }
         }
+        Some("import") => run_session_import(args, json_mode),
+        Some("bundles") => run_session_bundles_list(json_mode),
+        Some("show") => run_session_bundle_show(args, json_mode),
+        Some("delete") => run_session_bundle_delete(args, json_mode),
         None | Some(_) => {
             // Just show current session
             if json_mode {
@@ -266,6 +270,265 @@ fn run_session(args: &[String], session: &str, json_mode: bool) {
             } else {
                 println!("{}", session);
             }
+        }
+    }
+}
+
+fn arg_value<'a>(args: &'a [String], names: &[&str]) -> Option<&'a str> {
+    for (i, arg) in args.iter().enumerate() {
+        if names.iter().any(|n| arg.as_str() == *n) {
+            return args.get(i + 1).map(|s| s.as_str());
+        }
+    }
+    None
+}
+
+fn read_import_source(source: &str) -> Result<String, String> {
+    if source == "-" {
+        use std::io::Read;
+        let mut buf = String::new();
+        std::io::stdin()
+            .read_to_string(&mut buf)
+            .map_err(|e| format!("Failed to read stdin: {}", e))?;
+        Ok(buf)
+    } else {
+        fs::read_to_string(source).map_err(|e| format!("Failed to read '{}': {}", source, e))
+    }
+}
+
+fn run_session_import(args: &[String], json_mode: bool) {
+    let Some(from) = arg_value(args, &["--from", "-f"]) else {
+        let msg = "session import requires --from <path|->";
+        if json_mode {
+            print_json_error(msg);
+        } else {
+            eprintln!("{} {}", color::error_indicator(), msg);
+        }
+        exit(1);
+    };
+    let Some(name) = arg_value(args, &["--name", "-n"]) else {
+        let msg = "session import requires --name <bundle-name>";
+        if json_mode {
+            print_json_error(msg);
+        } else {
+            eprintln!("{} {}", color::error_indicator(), msg);
+        }
+        exit(1);
+    };
+    if !validation::is_valid_session_name(name) {
+        let msg = validation::session_name_error(name);
+        if json_mode {
+            print_json_error_with_type(msg, "invalid_session_name");
+        } else {
+            eprintln!("{} {}", color::error_indicator(), msg);
+        }
+        exit(1);
+    }
+
+    let format = arg_value(args, &["--format"])
+        .map(|s| {
+            native::import::SourceFormat::from_str(s).unwrap_or(native::import::SourceFormat::Auto)
+        })
+        .unwrap_or(native::import::SourceFormat::Auto);
+
+    let raw = match read_import_source(from) {
+        Ok(s) => s,
+        Err(e) => {
+            if json_mode {
+                print_json_error(e);
+            } else {
+                eprintln!("{} {}", color::error_indicator(), e);
+            }
+            exit(1);
+        }
+    };
+
+    let imported = match native::import::parse_imported_session(&raw, format) {
+        Ok(s) => s,
+        Err(e) => {
+            if json_mode {
+                print_json_error(format!("session import: {}", e));
+            } else {
+                eprintln!("{} session import: {}", color::error_indicator(), e);
+            }
+            exit(1);
+        }
+    };
+
+    let dir = match native::import::save_bundle(name, &imported) {
+        Ok(d) => d,
+        Err(e) => {
+            if json_mode {
+                print_json_error(format!("session import: {}", e));
+            } else {
+                eprintln!("{} session import: {}", color::error_indicator(), e);
+            }
+            exit(1);
+        }
+    };
+
+    if json_mode {
+        print_json_value(json!({
+            "success": true,
+            "data": {
+                "name": name,
+                "path": dir.to_string_lossy(),
+                "sourceFormat": imported.source_format.map(|f| f.as_str()).unwrap_or("auto"),
+                "cookies": imported.cookies.len(),
+                "uaCh": imported.ua_ch.len(),
+                "origin": imported.origin,
+                "warnings": imported.warnings,
+            },
+        }));
+    } else {
+        println!("Imported session bundle '{}'", name);
+        println!("  path:           {}", dir.to_string_lossy());
+        println!(
+            "  source format:  {}",
+            imported.source_format.map(|f| f.as_str()).unwrap_or("auto")
+        );
+        if let Some(ref origin) = imported.origin {
+            println!("  origin:         {}", origin);
+        }
+        println!("  cookies:        {}", imported.cookies.len());
+        println!("  sec-ch-ua-*:    {}", imported.ua_ch.len());
+        if let Some(ref ua) = imported.user_agent {
+            println!("  user-agent:     {}", truncate_for_display(ua, 80));
+        }
+        if !imported.warnings.is_empty() {
+            for w in &imported.warnings {
+                eprintln!("{} {}", color::warning_indicator(), w);
+            }
+        }
+        println!();
+        println!(
+            "Use it with:  agent-browser --import-session {} open <url>",
+            name
+        );
+    }
+}
+
+fn truncate_for_display(s: &str, max: usize) -> String {
+    if s.chars().count() <= max {
+        s.to_string()
+    } else {
+        let truncated: String = s.chars().take(max - 1).collect();
+        format!("{}…", truncated)
+    }
+}
+
+fn run_session_bundles_list(json_mode: bool) {
+    let names = native::import::list_bundles();
+    if json_mode {
+        print_json_value(json!({
+            "success": true,
+            "data": { "bundles": names },
+        }));
+    } else if names.is_empty() {
+        println!("No session bundles");
+    } else {
+        println!("Session bundles:");
+        for n in &names {
+            println!("  {}", n);
+        }
+    }
+}
+
+fn run_session_bundle_show(args: &[String], json_mode: bool) {
+    let Some(name) = args.get(2).map(|s| s.as_str()) else {
+        let msg = "session show requires a bundle name";
+        if json_mode {
+            print_json_error(msg);
+        } else {
+            eprintln!("{} {}", color::error_indicator(), msg);
+        }
+        exit(1);
+    };
+    match native::import::load_bundle(name) {
+        Ok((manifest, cookies, _storage)) => {
+            let cookie_names: Vec<String> = cookies
+                .iter()
+                .filter_map(|c| c.get("name").and_then(|v| v.as_str()).map(String::from))
+                .collect();
+            if json_mode {
+                print_json_value(json!({
+                    "success": true,
+                    "data": {
+                        "manifest": manifest,
+                        "cookieNames": cookie_names,
+                    },
+                }));
+            } else {
+                println!("Bundle '{}'", manifest.name);
+                println!("  schemaVersion: {}", manifest.schema_version);
+                println!("  capturedAt:    {}", manifest.captured_at);
+                println!("  sourceFormat:  {}", manifest.source_format);
+                if let Some(ref v) = manifest.source_chrome_full_version {
+                    println!("  chromeVersion: {}", v);
+                }
+                if let Some(ref o) = manifest.origin {
+                    println!("  origin:        {}", o);
+                }
+                if let Some(ref ua) = manifest.user_agent {
+                    println!("  userAgent:     {}", truncate_for_display(ua, 80));
+                }
+                if let Some(ref al) = manifest.accept_language {
+                    println!("  acceptLanguage:{}", al);
+                }
+                println!("  uaCh:");
+                for (k, v) in &manifest.ua_ch {
+                    println!("    {}: {}", k, truncate_for_display(v, 70));
+                }
+                println!("  hasCookies:    {}", manifest.has_cookies);
+                println!("  hasStorage:    {}", manifest.has_storage_state);
+                println!("  cookieNames:   {}", cookie_names.join(", "));
+                if !manifest.notes.is_empty() {
+                    println!("  notes:");
+                    for n in &manifest.notes {
+                        println!("    - {}", n);
+                    }
+                }
+            }
+        }
+        Err(e) => {
+            if json_mode {
+                print_json_error(e);
+            } else {
+                eprintln!("{} {}", color::error_indicator(), e);
+            }
+            exit(1);
+        }
+    }
+}
+
+fn run_session_bundle_delete(args: &[String], json_mode: bool) {
+    let Some(name) = args.get(2).map(|s| s.as_str()) else {
+        let msg = "session delete requires a bundle name";
+        if json_mode {
+            print_json_error(msg);
+        } else {
+            eprintln!("{} {}", color::error_indicator(), msg);
+        }
+        exit(1);
+    };
+    match native::import::delete_bundle(name) {
+        Ok(()) => {
+            if json_mode {
+                print_json_value(json!({
+                    "success": true,
+                    "data": { "deleted": name },
+                }));
+            } else {
+                println!("Deleted bundle '{}'", name);
+            }
+        }
+        Err(e) => {
+            if json_mode {
+                print_json_error(e);
+            } else {
+                eprintln!("{} {}", color::error_indicator(), e);
+            }
+            exit(1);
         }
     }
 }
@@ -735,6 +998,50 @@ fn main() {
         }
     }
 
+    // --import-session and --profile are mutually exclusive: the bundle
+    // implies a state-driven session (cookies + UA-CH) and a Chrome profile
+    // is a separate persistence mechanism that would silently override it.
+    if flags.import_session.is_some() && flags.profile.is_some() {
+        let msg =
+            "--import-session cannot be combined with --profile. Pick one persistence strategy.";
+        if flags.json {
+            print_json_error(msg);
+        } else {
+            eprintln!("{} {}", color::error_indicator(), msg);
+        }
+        exit(1);
+    }
+
+    // Validate --import-session: the bundle must exist on disk before we
+    // start the daemon, so the user sees a clean error here rather than a
+    // delayed daemon-side failure.
+    if let Some(ref name) = flags.import_session {
+        if !validation::is_valid_session_name(name) {
+            let msg = validation::session_name_error(name);
+            if flags.json {
+                print_json_error_with_type(msg, "invalid_session_name");
+            } else {
+                eprintln!("{} {}", color::error_indicator(), msg);
+            }
+            exit(1);
+        }
+        let dir = native::import::bundle_dir(name);
+        let plain = dir.join("bundle.json");
+        let enc = dir.join("bundle.json.enc");
+        if !plain.exists() && !enc.exists() {
+            let msg = format!(
+                "--import-session: bundle '{}' not found. Run `agent-browser session import --from <file> --name {}` first.",
+                name, name
+            );
+            if flags.json {
+                print_json_error(msg);
+            } else {
+                eprintln!("{} {}", color::error_indicator(), msg);
+            }
+            exit(1);
+        }
+    }
+
     // Handle state management commands locally — these are pure file operations
     // that don't need a daemon, avoiding an unnecessary daemon startup that
     // would lack runtime config like session_name.
@@ -792,6 +1099,7 @@ fn main() {
         provider: flags.provider.as_deref(),
         device: flags.device.as_deref(),
         session_name: flags.session_name.as_deref(),
+        import_session: flags.import_session.as_deref(),
         download_path: flags.download_path.as_deref(),
         allowed_domains: flags.allowed_domains.as_deref(),
         action_policy: flags.action_policy.as_deref(),

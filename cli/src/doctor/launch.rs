@@ -74,6 +74,7 @@ pub(super) fn check(checks: &mut Vec<Check>) {
         provider: None,
         device: None,
         session_name: None,
+        import_session: None,
         download_path: None,
         allowed_domains: None,
         action_policy: None,
